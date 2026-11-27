@@ -105,6 +105,7 @@ racepath analyze examples/sram_demo.cdl -o sram_demo_racepath
 | `-f {auto,cdl,spice,hspice,spectre}` | 形式(既定は自動判定:拡張子 `.scs` や `simulator lang=spectre` で判断) |
 | `-t TOP` | トップセル(既定:どこからもインスタンスされない subckt のうちデバイス数最大のもの) |
 | `-s NET` | 起点ネット(複数可。既定:PININFO の `I` ピン、なければ駆動されていないトップポート) |
+| `--static PIN` | 固定端子(テストモードなど。グロブ可、複数可)。起点にしないので、固定端子だけから生まれる偽の競合が出なくなる |
 | `-c CONFIG` | 設定ファイル(JSON、または PyYAML があれば YAML) |
 | `--prefix XDUT.` | テストベンチでの DUT の階層パス(`v(...)` の前に付く) |
 | `--no-group` | 同型の競合をまとめずに全件出す |
@@ -153,6 +154,22 @@ Spectre の `.measure`、HSPICE の `.lis` / `.log` / `.mt0` を読み、指標�
 
 詳しい判定条件・出力形式は [docs/BUILD_SPEC.md](docs/BUILD_SPEC.md) を参照してください。
 
+## 固定端子(テストモード端子など)を除外する
+
+PININFO で入力になっている端子は、すべて起点(信号が変化する端子)として扱われます。テストモード端子やスキャンイネーブルのように
+通常動作では固定の端子があると、それだけから作られる信号同士の合流が「競合」として出てしまいます。
+そうした端子は固定端子として指定してください。
+
+```json
+{"static_inputs": ["TM*", "SCAN_EN", "TEST*"]}
+```
+
+または `racepath analyze macro.cdl --static "TM*" --static SCAN_EN`、画面ではオプションの「固定端子」欄に書きます。
+
+- 指定した端子は起点になりません。CLK などからの経路が固定端子のゲートを通る競合は、これまでどおり検出します。
+- 該当した端子はコンソール(`static inputs: ...`)とレポートの見出しに表示されます。名前が合わなければ `(none matched ...)` と出ます。
+- デッキでは、固定端子は 1GΩ で接地(0V)されます。1 に固定する端子はコーナー定義の `static` に `{"TM": "vdd_m"}` のように書いてください。
+
 ## 設定ファイル(`racepath.json`)
 
 必要なキーだけ書けば、残りは既定値が使われます。
@@ -167,6 +184,7 @@ Spectre の `.measure`、HSPICE の `.lis` / `.log` / `.mt0` を読み、指標�
 | `high_supplies` | `VDD* VCC* VPWR* VPP* AVDD* DVDD*` | デッキで `vdd_m` を与える電源 |
 | `pmos_models` / `nmos_models` | `^p\|pch\|pmos\|pfet` / `^n\|nch\|nmos\|nfet` | MOS 判定の正規表現 |
 | `sources` | `[]` | 起点ネット |
+| `static_inputs` | `[]` | 固定端子のグロブ(例 `["TM*", "SCAN_EN", "TEST*"]`)。通常動作で固定の入力ピンを起点から外す |
 | `probe_prefix` | `XDUT.` | DUT の階層パス |
 | `merge_resistors` | `true` | 抵抗をショートとみなす(寄生抽出後のネット対策) |
 | `ignore_nets` | `[]` | この名前に触れる競合を除外 |

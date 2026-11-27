@@ -171,6 +171,7 @@ class App:
                 "analyzed": True,
                 "top": m.get("top"), "format": m.get("format"), "n_mos": m.get("n_mos"),
                 "n_ccc": m.get("n_ccc"), "sources": m.get("sources", []),
+                "static_inputs": m.get("static_inputs", []),
                 "warnings": m.get("warnings", []), "counts": counts,
                 "races": [{"id": r["id"], "class": r["class"], "a": r["a"], "b": r["b"],
                            "stages_a": r.get("stages_a"), "stages_b": r.get("stages_b"),
@@ -232,6 +233,11 @@ class App:
             argv += ["-s", s]
         if srcs:
             opts["sources"] = " ".join(srcs)
+        stat = [s for s in re.split(r"[\s,]+", str(req.get("static") or "")) if s]
+        for s in stat:
+            argv += ["--static", s]
+        if stat:
+            opts["static"] = " ".join(stat)
         prefix = str(req.get("prefix") or "").strip()
         if prefix:
             argv += ["--prefix", prefix]

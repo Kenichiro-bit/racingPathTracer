@@ -1,0 +1,72 @@
+* racepath test case: a test-mode pin (TM) that is held constant during normal operation.
+* TM gates the word line (NAND with CLKBUF) and also feeds TM-only logic (TMB/TMBB -> TMX).
+* Without static_inputs, TM is used as a launch net and the TM-only reconvergence
+* (TMB vs TMBB at XT2) is reported as a race. With static_inputs = ["TM"] it must not be,
+* while every CLK race (including the one through the TM-gated word line) stays.
+.GLOBAL VDD VSS
+.SUBCKT INV A Y VDD VSS
+MP0 Y A VDD VDD pch W=0.4u L=0.04u
+MN0 Y A VSS VSS nch W=0.2u L=0.04u
+.ENDS
+.SUBCKT NAND2 A B Y VDD VSS
+MP0 Y A VDD VDD pch W=0.4u L=0.04u
+MP1 Y B VDD VDD pch W=0.4u L=0.04u
+MN0 Y A X VSS nch W=0.4u L=0.04u
+MN1 X B VSS VSS nch W=0.4u L=0.04u
+.ENDS
+.SUBCKT SRAM6T BL BLB WL VDD VSS
+MPU0 Q QB VDD VDD pch W=0.1u L=0.04u
+MPD0 Q QB VSS VSS nch W=0.2u L=0.04u
+MPU1 QB Q VDD VDD pch W=0.1u L=0.04u
+MPD1 QB Q VSS VSS nch W=0.2u L=0.04u
+MPG0 BL WL Q VSS nch W=0.15u L=0.04u
+MPG1 BLB WL QB VSS nch W=0.15u L=0.04u
+.ENDS
+.SUBCKT SA BL BLB SAE SAT SAC VDD VSS
+MCP0 BL SAE SAT VDD pch W=0.3u L=0.04u
+MCP1 BLB SAE SAC VDD pch W=0.3u L=0.04u
+MP1 SAT SAC VDD VDD pch W=0.3u L=0.04u
+MP2 SAC SAT VDD VDD pch W=0.3u L=0.04u
+MN1 SAT SAC TAIL VSS nch W=0.6u L=0.04u
+MN2 SAC SAT TAIL VSS nch W=0.6u L=0.04u
+MNT TAIL SAE VSS VSS nch W=1u L=0.04u
+.ENDS
+.SUBCKT LATCH DIN CK CKB Q VDD VSS
+XDRV DIN DL VDD VSS INV
+MTN DL CKB X VSS nch W=0.2u L=0.04u
+MTP DL CK X VDD pch W=0.4u L=0.04u
+XQ X Q VDD VSS INV
+MFP1 F1 Q VDD VDD pch W=0.2u L=0.04u
+MFP2 X CKB F1 VDD pch W=0.2u L=0.04u
+MFN2 X CK F2 VSS nch W=0.1u L=0.04u
+MFN1 F2 Q VSS VSS nch W=0.1u L=0.04u
+.ENDS
+.SUBCKT TM_DEMO CLK TM Q VDD VSS
+*.PININFO CLK:I TM:I Q:O VDD:B VSS:B
+XI0 CLK CLKB VDD VSS INV
+XI1 CLKB CLKBUF VDD VSS INV
+* word line gated by the test-mode pin
+XW0 CLKBUF TM WLB VDD VSS NAND2
+XW1 WLB WL0 VDD VSS INV
+* TM-only logic: reconverges on itself, never toggles in normal operation
+XT0 TM TMB VDD VSS INV
+XT1 TMB TMBB VDD VSS INV
+XT2 TMB TMBB TMX VDD VSS NAND2
+XP0 CLKBUF PREB VDD VSS INV
+XP1 PREB PRE_N VDD VSS INV
+XS0 CLKBUF S1 VDD VSS INV
+XS1 S1 S2 VDD VSS INV
+XS2 S2 S3 VDD VSS INV
+XS3 S3 S4 VDD VSS INV
+XS4 S4 S5 VDD VSS INV
+XS5 S5 SAE VDD VSS INV
+MPRE0 BL PRE_N VDD VDD pch W=0.5u L=0.04u
+MPRE1 BLB PRE_N VDD VDD pch W=0.5u L=0.04u
+MEQ BL PRE_N BLB VDD pch W=0.3u L=0.04u
+XC0 BL BLB WL0 VDD VSS SRAM6T
+XC1 BL BLB VSS VDD VSS SRAM6T
+XSA BL BLB SAE SAT SAC VDD VSS SA
+XL0 CLKBUF CKI VDD VSS INV
+XL1 CKI CKBI VDD VSS INV
+XLAT SAT CKBI CKI Q VDD VSS LATCH
+.ENDS

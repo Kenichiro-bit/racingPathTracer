@@ -83,10 +83,30 @@ def test_demo(tmp_path, netlist, extra):
     analyze_parity(tmp_path, EXAMPLES / netlist, *extra)
 
 
+CASES = ROOT / "tests" / "cases"
+
+
+@pytest.mark.parametrize("case,extra", [
+    ("testmode.cdl", []),
+    ("testmode.cdl", ["--static", "TM"]),
+    ("testmode.cdl", ["--static", "t*", "--static", "nothing"]),
+    ("testmode.cdl", ["-s", "CLK", "-s", "TM", "--static", "TM"]),
+    ("testmode.cdl", ["--static", "SCAN_EN"]),
+])
+def test_cases(tmp_path, case, extra):
+    """Every reproduction case in tests/cases/ must also give identical results in both engines."""
+    analyze_parity(tmp_path, CASES / case, *extra)
+
+
+def test_all_cases_are_covered():
+    covered = {c for c, _ in test_cases.pytestmark[0].args[1]} if hasattr(test_cases, "pytestmark") else set()
+    assert {p.name for p in CASES.glob("*.cdl")} | {p.name for p in CASES.glob("*.scs")} <= covered
+
+
 def test_config_and_extra_checks(tmp_path):
     cfg = tmp_path / "cfg.json"
     cfg.write_text(json.dumps({
-        "supplies": ["VDD*", "VSS*"], "vdd": 0.75, "sa_dv_req": 0.07, "t_m": "2n",
+        "supplies": ["VDD*", "VSS*"], "vdd": 0.75, "static_inputs": ["Q*"], "sa_dv_req": 0.07, "t_m": "2n",
         "ignore_nets": ["PRE*"], "max_races": 3,
         "extra_checks": [{"class": "hold", "name": "manual1", "clk": "CKI", "data_in": "SAT"},
                          {"a": "WL0", "b": "SAE"}, {"a": "MISSING", "b": "SAE"}],

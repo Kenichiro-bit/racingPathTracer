@@ -2,7 +2,7 @@
 // Command-line front end for the JavaScript engine with the same arguments and outputs as
 // `python -m racepath`, used by tests/test_js_parity.py to compare the two implementations.
 //
-//   node tests/js/run_engine.js analyze NETLIST [-o OUT] [-f FMT] [-t TOP] [-s NET]... [-c CFG.json]
+//   node tests/js/run_engine.js analyze NETLIST [-o OUT] [-f FMT] [-t TOP] [-s NET]... [--static GLOB]... [-c CFG.json]
 //                                       [--prefix P] [--show N] [--no-group] [-q]
 //   node tests/js/run_engine.js decks RACES_JSON CORNERS_JSON [-o OUT] [--sim spectre|hspice]
 //   node tests/js/run_engine.js collect RACES_JSON RESULTS... [-o OUT] [--warn S] [--warn-v V] [--skew-warn S]
@@ -32,11 +32,11 @@ function walk(dir, rel, out) {
 const [cmd, ...rest] = process.argv.slice(2);
 try {
   if (cmd === 'analyze') {
-    const a = parse(rest, { flags: ['--no-group', '-q'], opts: ['-o', '-f', '-t', '-s', '-c', '--prefix', '--show'], multi: ['-s'] });
+    const a = parse(rest, { flags: ['--no-group', '-q'], opts: ['-o', '-f', '-t', '-s', '--static', '-c', '--prefix', '--show'], multi: ['-s', '--static'] });
     const netlist = a._[0], out = a['-o'] || 'racepath_out';
     const res = E.analyze({
       text: readText(netlist), netlist, netlistAbs: path.resolve(netlist), out,
-      format: a['-f'] || 'auto', top: a['-t'], sources: a['-s'] || [],
+      format: a['-f'] || 'auto', top: a['-t'], sources: a['-s'] || [], static: a['--static'] || [],
       config: a['-c'] ? JSON.parse(readText(a['-c'])) : null, prefix: a['--prefix'],
       noGroup: !!a['--no-group'], show: a['--show'] !== undefined ? parseInt(a['--show'], 10) : 30, quiet: !!a['-q'],
     });
