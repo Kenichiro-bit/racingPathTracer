@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-racepath.py - transistor-level race path finder with automatic probe selection.
+racepath - transistor-level race path finder with automatic probe selection.
 
 Finds pairs of signal paths that start from a common launch net (e.g. CLK),
 split, and reconverge on the same channel-connected block (CCC), classifies
@@ -30,7 +29,7 @@ import sys
 from collections import Counter, defaultdict, deque
 from itertools import combinations
 
-VERSION = "0.1.0"
+from racepath import __version__ as VERSION
 
 DEFAULT_CFG = {
     # net-name globs treated as supplies (case-insensitive, matched on leaf name)
