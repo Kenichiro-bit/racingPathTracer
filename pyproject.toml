@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "racepath"
+dynamic = ["version"]
+description = "Find racing paths in transistor-level netlists (CDL/Spectre) and generate auto-probe .measure statements"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+]
+
+[project.optional-dependencies]
+yaml = ["pyyaml"]
+dev = ["pytest"]
+
+[project.scripts]
+racepath = "racepath.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "racepath.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
