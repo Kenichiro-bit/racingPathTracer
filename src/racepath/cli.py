@@ -1467,6 +1467,11 @@ def cmd_collect(args):
             print(f"  {row[0]} {row[1]:<10} {row[2]:<10} worst={row[-3]} @ {row[-2]}  {row[-1]}")
 
 
+def cmd_serve(args):
+    from racepath.web import cmd_serve as _serve  # imported lazily: CLI-only users never load it
+    _serve(args)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="racepath", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1501,6 +1506,13 @@ def main(argv=None):
     c.add_argument("--warn-v", type=float, default=0.02, help="SA split margin warning level [V]")
     c.add_argument("--skew-warn", type=float, default=10e-12)
     c.set_defaults(func=cmd_collect)
+
+    w = sp.add_parser("serve", help="open a local browser UI (analyze / decks / collect)")
+    w.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1 = this PC only)")
+    w.add_argument("--port", type=int, default=8765)
+    w.add_argument("--workdir", default="racepath_web", help="where uploaded netlists and results are kept")
+    w.add_argument("--no-browser", action="store_true", help="do not open a browser automatically")
+    w.set_defaults(func=cmd_serve)
 
     args = ap.parse_args(argv)
     args.func(args)

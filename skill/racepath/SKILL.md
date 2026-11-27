@@ -52,5 +52,9 @@ racepath analyze <netlist> -o <netlistのstem>_racepath
    ```
    NG・要注意・順序反転・測定失敗を日本語で報告する。測定失敗は `.lis` / `.log` を開いて原因(構文、ノード名の解決、`cross=` で交差が見つからない など)を調べる。
 
+## ブラウザで見たいと言われたら
+`racepath serve` を案内する(ブラウザ画面で解析・デッキ作成・集計ができる。既定は `http://127.0.0.1:8765/`)。
+サーバーは終了するまで動き続けるので、Claude Code から起動する場合はバックグラウンドで実行し、URL を伝える。
+
 ## 守ること
 - racepath 本体は勝手に書き換えない。分類の誤りやパーサの問題を見つけたら、症状と修正案を示し、ユーザーの了承を得てから直す。直すのは racepath リポジトリ側(`src/racepath/cli.py`)で、そのリポジトリの CLAUDE.md に従う。誤分類はリポジトリの Issue テンプレート「誤分類の報告」で記録するとよい。直したら `templates/sram_demo.cdl` で再解析し、競合が次の6件のままであることを確かめる:sae_bl(SAE vs WL0)、wl_pre(PRE_N vs WL0)、hold×2(CKBI/CKI vs SAT)、clock_pair(CKBI vs CKI)、generic(PRE_N vs SAE)。
