@@ -5,12 +5,14 @@ description: トランジスタレベルのネットリスト(CDL/Spectre)から
 
 # racepath: ネットリストを入れるだけでレーシングパス解析
 
-このスキルのフォルダにある `scripts/racepath.py`(Python標準ライブラリのみ)を使う。
+`racepath` コマンド(`pip install` で入る。Python標準ライブラリのみ)を使う。
+`racepath` が見つからない(`command not found`)ときは、代わりに `python3 -m racepath` を使う。
+それも失敗するなら未インストールなので、リポジトリで `scripts/install_skill.sh` を実行するようユーザーに伝える。
 ユーザーにはネットリストのパスだけ受け取り、残りはここの手順で進める。報告は日本語で書く。
 
 ## 1. 解析
 ```
-python3 <このスキルのフォルダ>/scripts/racepath.py analyze <netlist> -o <netlistのstem>_racepath
+racepath analyze <netlist> -o <netlistのstem>_racepath
 ```
 - 起点ネット(`-s`)とトップ(`--top`)は自動判定される。ユーザーが指定したときだけ付ける。
 - プロジェクト直下に `racepath.json`(設定ファイル)があれば `-c racepath.json` を付ける。
@@ -37,18 +39,18 @@ python3 <このスキルのフォルダ>/scripts/racepath.py analyze <netlist> -
 解析結果から言えるのは構造だけ。「どちらが速いか」「NGかどうか」はシミュレーション前に断定しない。
 
 ## 4. ユーザーが望んだら:コーナーデッキ → 実行 → 集計
-1. コーナー定義:プロジェクトの `racepath_corners.json` を使う。無ければ `templates/corners.json` をコピーし、モデルファイルのパスとセクション名、VDD、温度、クロック周期をユーザーに確認して埋める。
+1. コーナー定義:プロジェクトの `racepath_corners.json` を使う。無ければこのスキルのフォルダの `templates/corners.json` をコピーし、モデルファイルのパスとセクション名、VDD、温度、クロック周期をユーザーに確認して埋める。
 2. デッキを作る:
    ```
-   python3 <スキル>/scripts/racepath.py decks <out>/races.json racepath_corners.json -o <out>/decks [--sim hspice]
+   racepath decks <out>/races.json racepath_corners.json -o <out>/decks [--sim hspice]
    ```
    自前のテストベンチを使うなら、`probe_prefix`(DUTの階層パス、既定は `XDUT.`)を合わせて `analyze --prefix` からやり直す。
 3. シミュレーション(`<out>/decks/run_all.sh`)は、ライセンスを使い時間もかかるので、**実行前に必ずユーザーに確認する**。
 4. 結果を集計する:
    ```
-   python3 <スキル>/scripts/racepath.py collect <out>/races.json <out>/decks -o <out>/summary.csv
+   racepath collect <out>/races.json <out>/decks -o <out>/summary.csv
    ```
    NG・要注意・順序反転・測定失敗を日本語で報告する。測定失敗は `.lis` / `.log` を開いて原因(構文、ノード名の解決、`cross=` で交差が見つからない など)を調べる。
 
 ## 守ること
-- `scripts/racepath.py` は勝手に書き換えない。分類の誤りやパーサの問題を見つけたら、症状と修正案を示し、ユーザーの了承を得てから直す。直したら `templates/sram_demo.cdl` で再解析し、競合が次の6件のままであることを確かめる:sae_bl(SAE vs WL0)、wl_pre(PRE_N vs WL0)、hold×2(CKBI/CKI vs SAT)、clock_pair(CKBI vs CKI)、generic(PRE_N vs SAE)。
+- racepath 本体は勝手に書き換えない。分類の誤りやパーサの問題を見つけたら、症状と修正案を示し、ユーザーの了承を得てから直す。直すのは racepath リポジトリ側(`src/racepath/cli.py`)で、そのリポジトリの CLAUDE.md に従う。誤分類はリポジトリの Issue テンプレート「誤分類の報告」で記録するとよい。直したら `templates/sram_demo.cdl` で再解析し、競合が次の6件のままであることを確かめる:sae_bl(SAE vs WL0)、wl_pre(PRE_N vs WL0)、hold×2(CKBI/CKI vs SAT)、clock_pair(CKBI vs CKI)、generic(PRE_N vs SAE)。
