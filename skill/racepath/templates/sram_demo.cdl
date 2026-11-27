@@ -1,0 +1,81 @@
+* racepath demo netlist (CDL)
+* Tiny SRAM column + self-timed control + output latch.
+* Intended races:
+*   WL0  vs SAE    -> SAE fires before enough BL split   (sae_bl)
+*   WL0  vs PRE_N  -> WL opens while precharge still on  (wl_pre)
+*   SAT  vs CKI    -> SA output reaches latch vs latch closing (hold)
+.GLOBAL VDD VSS
+
+.SUBCKT INV A Y VDD VSS
+*.PININFO A:I Y:O VDD:B VSS:B
+MP0 Y A VDD VDD pch W=0.4u L=0.04u
+MN0 Y A VSS VSS nch W=0.2u L=0.04u
+.ENDS
+
+.SUBCKT SRAM6T BL BLB WL VDD VSS
+*.PININFO BL:B BLB:B WL:I VDD:B VSS:B
+MPU0 Q QB VDD VDD pch W=0.1u L=0.04u
+MPD0 Q QB VSS VSS nch W=0.2u L=0.04u
+MPU1 QB Q VDD VDD pch W=0.1u L=0.04u
+MPD1 QB Q VSS VSS nch W=0.2u L=0.04u
+MPG0 BL WL Q VSS nch W=0.15u L=0.04u
+MPG1 BLB WL QB VSS nch W=0.15u L=0.04u
+.ENDS
+
+.SUBCKT SA BL BLB SAE SAT SAC VDD VSS
+*.PININFO BL:B BLB:B SAE:I SAT:O SAC:O VDD:B VSS:B
+* column isolation PMOS (off when SAE goes high)
+MCP0 BL SAE SAT VDD pch W=0.3u L=0.04u
+MCP1 BLB SAE SAC VDD pch W=0.3u L=0.04u
+* cross-coupled latch-type sense amp with NMOS tail
+MP1 SAT SAC VDD VDD pch W=0.3u L=0.04u
+MP2 SAC SAT VDD VDD pch W=0.3u L=0.04u
+MN1 SAT SAC TAIL VSS nch W=0.6u L=0.04u
+MN2 SAC SAT TAIL VSS nch W=0.6u L=0.04u
+MNT TAIL SAE VSS VSS nch W=1u L=0.04u
+.ENDS
+
+.SUBCKT LATCH DIN CK CKB Q VDD VSS
+*.PININFO DIN:I CK:I CKB:I Q:O VDD:B VSS:B
+XDRV DIN DL VDD VSS INV
+* transmission gate, transparent while CK=0
+MTN DL CKB X VSS nch W=0.2u L=0.04u
+MTP DL CK X VDD pch W=0.4u L=0.04u
+XQ X Q VDD VSS INV
+* clocked feedback tri-state (on while CK=1)
+MFP1 F1 Q VDD VDD pch W=0.2u L=0.04u
+MFP2 X CKB F1 VDD pch W=0.2u L=0.04u
+MFN2 X CK F2 VSS nch W=0.1u L=0.04u
+MFN1 F2 Q VSS VSS nch W=0.1u L=0.04u
+.ENDS
+
+.SUBCKT SRAM_DEMO CLK Q VDD VSS
+*.PININFO CLK:I Q:O VDD:B VSS:B
+XI0 CLK CLKB VDD VSS INV
+XI1 CLKB CLKBUF VDD VSS INV
+* word line path (2 stages)
+XW0 CLKBUF WLB VDD VSS INV
+XW1 WLB WL0 VDD VSS INV
+* precharge release: PRE_N goes high on CLK rise
+XP0 CLKBUF PREB VDD VSS INV
+XP1 PREB PRE_N VDD VSS INV
+* SAE replica delay chain (6 stages)
+XS0 CLKBUF S1 VDD VSS INV
+XS1 S1 S2 VDD VSS INV
+XS2 S2 S3 VDD VSS INV
+XS3 S3 S4 VDD VSS INV
+XS4 S4 S5 VDD VSS INV
+XS5 S5 SAE VDD VSS INV
+* bit line precharge + equalize
+MPRE0 BL PRE_N VDD VDD pch W=0.5u L=0.04u
+MPRE1 BLB PRE_N VDD VDD pch W=0.5u L=0.04u
+MEQ BL PRE_N BLB VDD pch W=0.3u L=0.04u
+* cells: row 0 selected, row 1 held off
+XC0 BL BLB WL0 VDD VSS SRAM6T
+XC1 BL BLB VSS VDD VSS SRAM6T
+XSA BL BLB SAE SAT SAC VDD VSS SA
+* output latch; clock derived from CLKBUF, data from SA output
+XL0 CLKBUF CKI VDD VSS INV
+XL1 CKI CKBI VDD VSS INV
+XLAT SAT CKBI CKI Q VDD VSS LATCH
+.ENDS

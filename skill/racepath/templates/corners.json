@@ -1,0 +1,20 @@
+{
+  "simulator": "spectre",
+  "tran_stop": "12n",
+  "tran_step": "1p",
+  "t_m": "1n",
+  "stimulus": {
+    "CLK": {"delay": "1n", "period": "4n", "width": "2n", "tr": "30p"}
+  },
+  "static": {},
+  "supplies": {"VDD": "vdd_m", "VSS": 0},
+  "corners": [
+    {"name": "tt_0p80v_25c",  "lib": ["/path/to/models.scs", "tt"], "vdd": 0.80, "temp": 25},
+    {"name": "ss_0p72v_m40c", "lib": ["/path/to/models.scs", "ss"], "vdd": 0.72, "temp": -40},
+    {"name": "ss_0p72v_125c", "lib": ["/path/to/models.scs", "ss"], "vdd": 0.72, "temp": 125},
+    {"name": "ff_0p88v_m40c", "lib": ["/path/to/models.scs", "ff"], "vdd": 0.88, "temp": -40},
+    {"name": "sf_0p72v_m40c", "lib": ["/path/to/models.scs", "sf"], "vdd": 0.72, "temp": -40,
+     "params": {"sa_dv_req": 0.07}},
+    {"name": "fs_0p72v_m40c", "lib": ["/path/to/models.scs", "fs"], "vdd": 0.72, "temp": -40}
+  ]
+}
