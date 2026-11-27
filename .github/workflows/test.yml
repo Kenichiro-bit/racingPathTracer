@@ -69,6 +69,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
           npm install --no-save playwright@1.63.0
+          # the runner's preinstalled Microsoft apt source sometimes answers 403 and breaks
+          # apt-get update; it is not needed here
+          sudo rm -f /etc/apt/sources.list.d/microsoft*
           npx playwright install --with-deps chromium
       - name: racepath.html is up to date
         run: python scripts/build_offline_html.py --check
