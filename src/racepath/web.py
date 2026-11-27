@@ -1,8 +1,10 @@
 """Local browser UI for racepath (``racepath serve``).
 
 A small single-page app served by the standard library ``http.server``.
-It drives the existing CLI subcommands (analyze / decks / collect) in-process,
-so detection logic and output formats are exactly those of the CLI.
+The work itself is done by :mod:`racepath.jobs`, which drives the existing CLI
+subcommands, so detection logic and output formats are exactly those of the CLI.
+The same page (INDEX_HTML) is reused by the offline single-file build, where
+``window.racepathLocal`` replaces the HTTP API with Pyodide.
 
 Security model: the server binds to 127.0.0.1 by default, checks the Host
 header (DNS rebinding), and requires a per-process random token on every API
@@ -10,50 +12,21 @@ call (CSRF from other web pages). Files are only served from the work dir.
 """
 from __future__ import annotations
 
-import contextlib
-import csv
-import io
 import json
 import os
-import re
 import secrets
-import shutil
 import sys
 import threading
-import time
 import traceback
 import webbrowser
-import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
 from racepath import __version__
+from racepath.jobs import (  # noqa: F401  (re-exported for tests and the offline build)
+    DEFAULT_CORNERS, OUTPUT_FILES, ApiError, App, run_cli, within,
+)
 
-# Same content as examples/corners.json (kept in sync by a test).
-DEFAULT_CORNERS = {
-    "simulator": "spectre",
-    "tran_stop": "12n",
-    "tran_step": "1p",
-    "t_m": "1n",
-    "stimulus": {
-        "CLK": {"delay": "1n", "period": "4n", "width": "2n", "tr": "30p"}
-    },
-    "static": {},
-    "supplies": {"VDD": "vdd_m", "VSS": 0},
-    "corners": [
-        {"name": "tt_0p80v_25c", "lib": ["/path/to/models.scs", "tt"], "vdd": 0.80, "temp": 25},
-        {"name": "ss_0p72v_m40c", "lib": ["/path/to/models.scs", "ss"], "vdd": 0.72, "temp": -40},
-        {"name": "ss_0p72v_125c", "lib": ["/path/to/models.scs", "ss"], "vdd": 0.72, "temp": 125},
-        {"name": "ff_0p88v_m40c", "lib": ["/path/to/models.scs", "ff"], "vdd": 0.88, "temp": -40},
-        {"name": "sf_0p72v_m40c", "lib": ["/path/to/models.scs", "sf"], "vdd": 0.72, "temp": -40,
-         "params": {"sa_dv_req": 0.07}},
-        {"name": "fs_0p72v_m40c", "lib": ["/path/to/models.scs", "fs"], "vdd": 0.72, "temp": -40},
-    ],
-}
-
-RESULT_EXT = re.compile(r"\.(mt\d*|ms\d*|measure|lis|log|out)$", re.I)
-JOB_RE = re.compile(r"^[A-Za-z0-9._-]{1,120}$")
-OUTPUT_FILES = ["report.html", "races.meas", "races_params.inc", "races.csv", "races.json"]
 CTYPES = {
     ".html": "text/html; charset=utf-8",
     ".json": "application/json; charset=utf-8",
@@ -61,342 +34,6 @@ CTYPES = {
     ".zip": "application/zip",
     ".png": "image/png",
 }
-
-_RUN_LOCK = threading.Lock()  # redirect_stdout is process-wide
-
-
-class ApiError(Exception):
-    def __init__(self, status, message, log=""):
-        super().__init__(message)
-        self.status, self.message, self.log = status, message, log
-
-
-def run_cli(argv):
-    """Run ``racepath <argv>`` in-process; return (ok, console text)."""
-    from racepath.cli import main
-
-    buf = io.StringIO()
-    ok = True
-    with _RUN_LOCK, contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
-        try:
-            main(argv)
-        except SystemExit as e:
-            if e.code not in (0, None):
-                ok = False
-                if isinstance(e.code, str):
-                    print(e.code)
-        except Exception:  # report parser/flatten errors to the UI
-            ok = False
-            traceback.print_exc()
-    return ok, buf.getvalue()
-
-
-def safe_name(name, default="file"):
-    name = re.sub(r"[^A-Za-z0-9._<>+-]", "_", name.strip()).strip("._")
-    return name[:120] or default
-
-
-def safe_relpath(rel):
-    parts = [safe_name(p) for p in re.split(r"[\\/]+", rel) if p not in ("", ".", "..")]
-    return os.path.join(*parts) if parts else "file"
-
-
-def within(base, path):
-    base = os.path.realpath(base)
-    path = os.path.realpath(path)
-    return path == base or path.startswith(base + os.sep)
-
-
-class App:
-    def __init__(self, workdir, token):
-        self.workdir = os.path.abspath(workdir)
-        self.token = token
-        os.makedirs(self.workdir, exist_ok=True)
-        self._job_lock = threading.Lock()
-
-    # ------------------------------------------------------------------ jobs
-    def job_dir(self, job):
-        if not isinstance(job, str) or not JOB_RE.match(job):
-            raise ApiError(404, "解析ジョブが見つかりません")
-        d = os.path.join(self.workdir, job)
-        if not os.path.isdir(d) or not within(self.workdir, d):
-            raise ApiError(404, f"解析ジョブ {job} が見つかりません")
-        return d
-
-    def new_job(self, stem):
-        base = time.strftime("%Y%m%d-%H%M%S") + "_" + safe_name(stem, "netlist")
-        with self._job_lock:
-            job, i = base, 1
-            while os.path.exists(os.path.join(self.workdir, job)):
-                i += 1
-                job = f"{base}-{i}"
-            os.makedirs(os.path.join(self.workdir, job))
-        return job
-
-    def read_meta(self, d):
-        try:
-            with open(os.path.join(d, "job.json"), encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            return {}
-
-    def write_meta(self, d, meta):
-        with open(os.path.join(d, "job.json"), "w", encoding="utf-8") as f:
-            json.dump(meta, f, ensure_ascii=False, indent=1)
-
-    def list_jobs(self):
-        out = []
-        for name in sorted(os.listdir(self.workdir), reverse=True):
-            d = os.path.join(self.workdir, name)
-            if not (JOB_RE.match(name) and os.path.isdir(d)):
-                continue
-            m = self.read_meta(d)
-            races = None
-            rj = os.path.join(d, "out", "races.json")
-            if os.path.isfile(rj):
-                try:
-                    with open(rj, encoding="utf-8") as f:
-                        races = len(json.load(f)["races"])
-                except (OSError, ValueError, KeyError):
-                    pass
-            out.append({"job": name, "netlist": m.get("netlist_name", ""), "races": races,
-                        "created": m.get("created", "")})
-        return out[:100]
-
-    def summary(self, job):
-        d = self.job_dir(job)
-        meta = self.read_meta(d)
-        res = {"job": job, "netlist_name": meta.get("netlist_name", ""),
-               "netlist_path": meta.get("netlist_path", ""), "options": meta.get("options", {}),
-               "log": "", "analyzed": False}
-        try:
-            with open(os.path.join(d, "analyze.log"), encoding="utf-8") as f:
-                res["log"] = f.read()
-        except OSError:
-            pass
-        rj = os.path.join(d, "out", "races.json")
-        if os.path.isfile(rj):
-            with open(rj, encoding="utf-8") as f:
-                data = json.load(f)
-            m = data["meta"]
-            counts = {}
-            for r in data["races"]:
-                counts[r["class"]] = counts.get(r["class"], 0) + 1
-            res.update({
-                "analyzed": True,
-                "top": m.get("top"), "format": m.get("format"), "n_mos": m.get("n_mos"),
-                "n_ccc": m.get("n_ccc"), "sources": m.get("sources", []),
-                "warnings": m.get("warnings", []), "counts": counts,
-                "races": [{"id": r["id"], "class": r["class"], "a": r["a"], "b": r["b"],
-                           "stages_a": r.get("stages_a"), "stages_b": r.get("stages_b"),
-                           "divergence": r.get("divergence"), "group_size": r.get("group_size", 1),
-                           "derived": r.get("derived", False), "explain": r.get("explain", "")}
-                          for r in data["races"]],
-                "files": [f for f in OUTPUT_FILES if os.path.isfile(os.path.join(d, "out", f))],
-            })
-        if os.path.isfile(os.path.join(d, "decks.zip")):
-            res["decks"] = self._deck_files(d)
-        if os.path.isfile(os.path.join(d, "summary.csv")):
-            res["collect"] = self._read_summary(d)
-        return res
-
-    # --------------------------------------------------------------- actions
-    def upload_netlist(self, name, stream, length):
-        name = safe_name(os.path.basename(name or "netlist.cdl"), "netlist.cdl")
-        job = self.new_job(os.path.splitext(name)[0])
-        d = os.path.join(self.workdir, job)
-        path = os.path.join(d, name)
-        _copy_stream(stream, path, length)
-        self.write_meta(d, {"netlist_name": name, "netlist_path": path, "uploaded": True,
-                            "created": time.strftime("%Y-%m-%d %H:%M:%S")})
-        return {"job": job, "netlist_name": name}
-
-    def analyze(self, req):
-        job = req.get("job")
-        if job:
-            d = self.job_dir(job)
-            meta = self.read_meta(d)
-            netlist = meta.get("netlist_path", "")
-        else:
-            netlist = os.path.abspath(os.path.expanduser(str(req.get("path", "")).strip()))
-            if not req.get("path") or not os.path.isfile(netlist):
-                raise ApiError(400, f"ネットリストが見つかりません: {req.get('path', '')}")
-            job = self.new_job(os.path.splitext(os.path.basename(netlist))[0])
-            d = os.path.join(self.workdir, job)
-            meta = {"netlist_name": os.path.basename(netlist), "netlist_path": netlist,
-                    "uploaded": False, "created": time.strftime("%Y-%m-%d %H:%M:%S")}
-        if not os.path.isfile(netlist):
-            raise ApiError(400, f"ネットリストが見つかりません: {netlist}")
-
-        out = os.path.join(d, "out")
-        if os.path.isdir(out):
-            shutil.rmtree(out)
-        argv = ["analyze", netlist, "-o", out]
-        opts = {}
-        fmt = req.get("format") or "auto"
-        if fmt not in ("auto", "cdl", "spice", "hspice", "spectre"):
-            raise ApiError(400, f"形式 {fmt} には対応していません")
-        argv += ["-f", fmt]
-        opts["format"] = fmt
-        top = str(req.get("top") or "").strip()
-        if top:
-            argv += ["-t", top]
-            opts["top"] = top
-        srcs = [s for s in re.split(r"[\s,]+", str(req.get("sources") or "")) if s]
-        for s in srcs:
-            argv += ["-s", s]
-        if srcs:
-            opts["sources"] = " ".join(srcs)
-        prefix = str(req.get("prefix") or "").strip()
-        if prefix:
-            argv += ["--prefix", prefix]
-            opts["prefix"] = prefix
-        if req.get("no_group"):
-            argv.append("--no-group")
-            opts["no_group"] = True
-        cfg_text = str(req.get("config") or "").strip()
-        cfg_path = os.path.join(d, "config.json")
-        if cfg_text:
-            try:
-                json.loads(cfg_text)
-            except ValueError as e:
-                raise ApiError(400, f"設定(JSON)を読めません: {e}")
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                f.write(cfg_text)
-            argv += ["-c", cfg_path]
-            opts["config"] = cfg_text
-        elif os.path.exists(cfg_path):
-            os.remove(cfg_path)
-        argv += ["--show", "200"]
-
-        ok, log = run_cli(argv)
-        with open(os.path.join(d, "analyze.log"), "w", encoding="utf-8") as f:
-            f.write(log)
-        meta["options"] = opts
-        self.write_meta(d, meta)
-        for stale in ("decks", "decks.zip", "summary.csv"):
-            p = os.path.join(d, stale)
-            if os.path.isdir(p):
-                shutil.rmtree(p)
-            elif os.path.exists(p):
-                os.remove(p)
-        if not ok:
-            raise ApiError(422, "解析に失敗しました。ログを確認してください。", log)
-        return self.summary(job)
-
-    def decks(self, req):
-        d = self.job_dir(req.get("job"))
-        rj = os.path.join(d, "out", "races.json")
-        if not os.path.isfile(rj):
-            raise ApiError(400, "先に解析を実行してください")
-        text = str(req.get("corners") or "").strip()
-        try:
-            json.loads(text)
-        except ValueError as e:
-            raise ApiError(400, f"コーナー定義(JSON)を読めません: {e}")
-        cpath = os.path.join(d, "corners.json")
-        with open(cpath, "w", encoding="utf-8") as f:
-            f.write(text)
-        sim = req.get("sim") or "spectre"
-        if sim not in ("spectre", "hspice"):
-            raise ApiError(400, f"シミュレータ {sim} には対応していません")
-        ddir = os.path.join(d, "decks")
-        if os.path.isdir(ddir):
-            shutil.rmtree(ddir)
-        ok, log = run_cli(["decks", rj, cpath, "-o", ddir, "--sim", sim])
-        if not ok:
-            raise ApiError(422, "デッキを作れませんでした。", log)
-        zpath = os.path.join(d, "decks.zip")
-        with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
-            for name in sorted(os.listdir(ddir)):
-                info = zipfile.ZipInfo(os.path.join("decks", name), time.localtime()[:6])
-                info.external_attr = (0o755 if name.endswith(".sh") else 0o644) << 16
-                info.compress_type = zipfile.ZIP_DEFLATED
-                with open(os.path.join(ddir, name), "rb") as f:
-                    z.writestr(info, f.read())
-        return {"log": log, "decks": self._deck_files(d)}
-
-    def _deck_files(self, d):
-        ddir = os.path.join(d, "decks")
-        return sorted(os.listdir(ddir)) if os.path.isdir(ddir) else []
-
-    def upload_result(self, job, rel, stream, length):
-        d = self.job_dir(job)
-        rel = safe_relpath(rel or "result.measure")
-        if not RESULT_EXT.search(rel):
-            _drain(stream, length)
-            return {"skipped": rel}
-        rdir = os.path.join(d, "results")
-        path = os.path.join(rdir, rel)
-        if not within(rdir, path):
-            raise ApiError(400, "不正なファイル名です")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        _copy_stream(stream, path, length)
-        return {"saved": rel}
-
-    def clear_results(self, job):
-        d = self.job_dir(job)
-        rdir = os.path.join(d, "results")
-        if os.path.isdir(rdir):
-            shutil.rmtree(rdir)
-        return {"ok": True}
-
-    def collect(self, req):
-        d = self.job_dir(req.get("job"))
-        rj = os.path.join(d, "out", "races.json")
-        if not os.path.isfile(rj):
-            raise ApiError(400, "先に解析を実行してください")
-        path = str(req.get("path") or "").strip()
-        if path:
-            src = os.path.abspath(os.path.expanduser(path))
-            if not os.path.exists(src):
-                raise ApiError(400, f"結果のフォルダ/ファイルが見つかりません: {path}")
-        else:
-            src = os.path.join(d, "results")
-            if not os.path.isdir(src):
-                raise ApiError(400, "結果ファイルをアップロードするか、フォルダのパスを指定してください")
-        argv = ["collect", rj, src, "-o", os.path.join(d, "summary.csv")]
-        for key, flag, scale in (("warn_ps", "--warn", 1e-12), ("warn_v", "--warn-v", 1.0),
-                                 ("skew_warn_ps", "--skew-warn", 1e-12)):
-            v = req.get(key)
-            if v not in (None, ""):
-                try:
-                    argv += [flag, repr(float(v) * scale)]
-                except (TypeError, ValueError):
-                    raise ApiError(400, f"{key} が数値ではありません: {v}")
-        sp = os.path.join(d, "summary.csv")
-        if os.path.exists(sp):
-            os.remove(sp)
-        ok, log = run_cli(argv)
-        if not ok:
-            raise ApiError(422, "集計できませんでした。", log)
-        res = self._read_summary(d)
-        res["log"] = log
-        return res
-
-    def _read_summary(self, d):
-        with open(os.path.join(d, "summary.csv"), encoding="utf-8-sig", newline="") as f:
-            rows = list(csv.reader(f))
-        return {"header": rows[0] if rows else [], "rows": rows[1:]}
-
-
-def _copy_stream(stream, path, length):
-    remaining = length
-    with open(path, "wb") as f:
-        while remaining > 0:
-            chunk = stream.read(min(1 << 20, remaining))
-            if not chunk:
-                break
-            f.write(chunk)
-            remaining -= len(chunk)
-
-
-def _drain(stream, length):
-    while length > 0:
-        chunk = stream.read(min(1 << 20, length))
-        if not chunk:
-            break
-        length -= len(chunk)
 
 
 def make_handler(app: App, allowed_hosts):
@@ -516,13 +153,7 @@ def make_handler(app: App, allowed_hosts):
             parts = rest.split("/", 1)
             if len(parts) != 2:
                 return self._error(404, "見つかりません")
-            d = app.job_dir(parts[0])
-            rel = parts[1]
-            allowed = rel in ("decks.zip", "summary.csv") or \
-                (rel.startswith("out/") and rel[4:] in OUTPUT_FILES)
-            path = os.path.join(d, *rel.split("/"))
-            if not allowed or not within(d, path) or not os.path.isfile(path):
-                return self._error(404, "見つかりません")
+            path = app.file_path(parts[0], parts[1])
             ext = os.path.splitext(path)[1].lower()
             ctype = CTYPES.get(ext, "text/plain; charset=utf-8")
             extra = {}
@@ -662,6 +293,8 @@ td.v-OK{color:var(--ok)}
 .jobs .m{color:var(--muted);font-size:13px}
 .hidden{display:none !important}
 .note{font-size:13px;color:var(--muted)}
+.boot{margin-top:8px;padding:8px 10px;border-radius:6px;background:var(--code);font-size:14px}
+.boot.err{color:var(--ng)}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;overflow-wrap:anywhere}
 </style>
 </head>
@@ -669,12 +302,13 @@ td.v-OK{color:var(--ok)}
 <header>
   <h1>racepath ローカル <span class="sub">v__VERSION__</span></h1>
   <div class="sub">ネットリストからレーシングパスを検出します。データはこのPCの外には出ません。</div>
+  <div class="boot hidden" id="boot" role="status"></div>
 </header>
 <main>
 
 <section id="sec-analyze">
   <h2><span class="n">1</span>解析</h2>
-  <div class="tabs" role="tablist">
+  <div class="tabs srv-only" role="tablist">
     <button type="button" role="tab" id="tab-file" aria-selected="true">ファイルを選ぶ</button>
     <button type="button" role="tab" id="tab-path" aria-selected="false">パスを指定</button>
   </div>
@@ -725,6 +359,7 @@ td.v-OK{color:var(--ok)}
     <div><label for="d-sim">シミュレータ</label>
       <select id="d-sim"><option value="spectre">Spectre</option><option value="hspice">HSPICE</option></select></div>
   </div>
+  <label><input type="checkbox" id="d-portable"> ネットリストと races.meas を zip に入れ、ファイル名で参照する(別のPCで実行する場合)</label>
   <label for="d-corners">コーナー定義(corners.json)</label>
   <textarea id="d-corners" rows="14"></textarea>
   <div class="actions">
@@ -736,7 +371,7 @@ td.v-OK{color:var(--ok)}
 
 <section id="sec-collect" class="hidden">
   <h2><span class="n">3</span>結果を集計する</h2>
-  <div class="tabs" role="tablist">
+  <div class="tabs srv-only" role="tablist">
     <button type="button" role="tab" id="ctab-up" aria-selected="true">フォルダ/ファイルを選ぶ</button>
     <button type="button" role="tab" id="ctab-path" aria-selected="false">パスを指定</button>
   </div>
@@ -768,6 +403,7 @@ td.v-OK{color:var(--ok)}
 </section>
 
 </main>
+<!--LOCAL_BACKEND-->
 <script>
 (function(){
 "use strict";
@@ -784,7 +420,9 @@ function el(tag, attrs, text){
   return e;
 }
 function setStatus(id, msg, kind){ var s=$(id); s.textContent=msg||""; s.className="status"+(kind?" "+kind:""); }
+var LOCAL = window.racepathLocal || null;
 function api(method, path, body, raw){
+  if(LOCAL) return LOCAL.api(method, path, body, raw);
   var opt = {method:method, headers:{"X-Racepath-Token":TOKEN}};
   if(body !== undefined){
     if(raw){ opt.body = body; opt.headers["Content-Type"]="application/octet-stream"; }
@@ -803,6 +441,16 @@ function tabs(a, b, pa, pb, key, val){
 }
 tabs("tab-file","tab-path","pane-file","pane-path","mode",["file","path"]);
 tabs("ctab-up","ctab-path","cpane-up","cpane-path","cmode",["up","path"]);
+if(LOCAL){
+  // offline build: no access to local paths, decks are always self-contained
+  [].forEach.call(document.querySelectorAll(".srv-only"), function(e){ e.classList.add("hidden"); });
+  $("d-portable").checked = true; $("d-portable").disabled = true;
+  var boot = $("boot"), ab = $("btn-analyze");
+  boot.classList.remove("hidden"); ab.disabled = true;
+  boot.textContent = "解析エンジン(ブラウザ内の Python)を準備しています…(初回は数秒〜十数秒)";
+  LOCAL.ready.then(function(){ boot.classList.add("hidden"); ab.disabled = false; },
+    function(e){ boot.className = "boot err"; boot.textContent = "解析エンジンを起動できませんでした: " + e.message; });
+}
 
 var drop = $("drop");
 ["dragenter","dragover"].forEach(function(t){ drop.addEventListener(t, function(e){ e.preventDefault(); drop.classList.add("over"); }); });
@@ -842,6 +490,25 @@ $("btn-analyze").addEventListener("click", function(){
 });
 
 function fileUrl(rel, dl){ return "/files/"+encodeURIComponent(state.job)+"/"+rel+(dl?"?dl=1":""); }
+// link to a job file; in the offline build the bytes come from the in-browser file system
+function fileLink(rel, text, dl, newTab){
+  var a = el("a",{href:fileUrl(rel, dl)}, text);
+  if(newTab){ a.target = "_blank"; a.rel = "noopener"; }
+  if(LOCAL){
+    var job = state.job;
+    a.addEventListener("click", function(e){
+      e.preventDefault();
+      var w = (!dl) ? window.open("", "_blank") : null;
+      LOCAL.file(job, rel).then(function(f){
+        var url = URL.createObjectURL(f.blob);
+        if(w){ w.location.href = url; }
+        else { var t = el("a",{href:url, download:f.name}); document.body.appendChild(t); t.click(); t.remove(); }
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 60000);
+      }).catch(function(err){ if(w) w.close(); alert(err.message); });
+    });
+  }
+  return a;
+}
 function show(res){
   state.job = res.job;
   $("sec-result").classList.remove("hidden");
@@ -860,10 +527,14 @@ function show(res){
   ORDER.forEach(function(c){ var n=(res.counts||{})[c]; if(!n) return;
     var s = el("span",{"class":"chip k-"+c}, CLASS_JA[c]+" "); s.appendChild(el("b",null,n)); chips.appendChild(s); });
   (res.warnings||[]).slice(0,20).forEach(function(w){ warns.appendChild(el("li",null,w)); });
-  var a = el("a",{href:fileUrl("out/report.html"),target:"_blank",rel:"noopener"},"レポートを新しいタブで開く");
-  files.appendChild(a);
-  (res.files||[]).forEach(function(f){ files.appendChild(el("a",{href:fileUrl("out/"+f,true)},f+" ⇩")); });
-  var fr = $("r-frame"); fr.classList.remove("hidden"); fr.src = fileUrl("out/report.html");
+  files.appendChild(fileLink("out/report.html","レポートを新しいタブで開く",false,true));
+  (res.files||[]).forEach(function(f){ files.appendChild(fileLink("out/"+f, f+" ⇩", true)); });
+  var fr = $("r-frame"); fr.classList.remove("hidden");
+  if(LOCAL){
+    LOCAL.file(res.job,"out/report.html").then(function(f){
+      if(state.reportUrl) URL.revokeObjectURL(state.reportUrl);
+      state.reportUrl = URL.createObjectURL(f.blob); fr.src = state.reportUrl; }); }
+  else { fr.src = fileUrl("out/report.html"); }
   $("sec-decks").classList.remove("hidden"); $("sec-collect").classList.remove("hidden");
   $("d-out").textContent = ""; $("c-out").textContent = "";
   setStatus("st-decks",""); setStatus("st-collect","");
@@ -874,14 +545,14 @@ function show(res){
 api("GET","/api/default-corners").then(function(c){ $("d-corners").value = JSON.stringify(c, null, 2); }).catch(function(){});
 $("btn-decks").addEventListener("click", function(){
   var btn=this; btn.disabled=true; setStatus("st-decks","作成中…");
-  api("POST","/api/decks",{job:state.job, corners:$("d-corners").value, sim:$("d-sim").value})
+  api("POST","/api/decks",{job:state.job, corners:$("d-corners").value, sim:$("d-sim").value, portable:$("d-portable").checked})
     .then(function(r){ setStatus("st-decks","作成しました("+r.decks.length+" ファイル)","ok"); showDecks(r.decks); })
     .catch(function(e){ setStatus("st-decks", e.message, "err"); if(e.log){ var p=el("pre",null,e.log); $("d-out").textContent=""; $("d-out").appendChild(p);} })
     .then(function(){ btn.disabled=false; });
 });
 function showDecks(list){
   var o = $("d-out"); o.textContent = "";
-  var f = el("div",{"class":"files"}); f.appendChild(el("a",{href:fileUrl("decks.zip")},"decks.zip をダウンロード ⇩")); o.appendChild(f);
+  var f = el("div",{"class":"files"}); f.appendChild(fileLink("decks.zip","decks.zip をダウンロード ⇩",true)); o.appendChild(f);
   o.appendChild(el("pre",null,list.join("\n")));
 }
 
@@ -913,7 +584,7 @@ $("btn-collect").addEventListener("click", function(){
 function vclass(v){ if(!v) return ""; if(v.indexOf("NG")>=0) return "v-NG"; if(v==="OK") return "v-OK"; return "v-warn"; }
 function showCollect(r){
   var o = $("c-out"); o.textContent = "";
-  var f = el("div",{"class":"files"}); f.appendChild(el("a",{href:fileUrl("summary.csv",true)},"summary.csv をダウンロード ⇩")); o.appendChild(f);
+  var f = el("div",{"class":"files"}); f.appendChild(fileLink("summary.csv","summary.csv をダウンロード ⇩",true)); o.appendChild(f);
   // show the verdict columns first so they are visible on a phone without scrolling
   // (summary.csv itself keeps the CLI column order)
   var H = r.header, n = H.length;

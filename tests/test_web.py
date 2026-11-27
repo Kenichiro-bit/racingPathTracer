@@ -218,3 +218,22 @@ def test_serve_help():
     p = subprocess.run([sys.executable, "-m", "racepath", "serve", "--help"],
                        capture_output=True, text=True)
     assert p.returncode == 0 and "--port" in p.stdout
+
+
+def test_portable_decks_bundle_netlist_and_meas(server):
+    base, httpd = server
+    job, _ = upload_and_analyze(base, EXAMPLES / "sram_demo.cdl")
+    corners = json.dumps(j(call(base, "GET", "/api/default-corners")))
+    res = j(call(base, "POST", "/api/decks", {"job": job, "corners": corners, "sim": "spectre",
+                                              "portable": True}))
+    assert res["portable"] is True
+    assert {"races.meas", "sram_demo.cdl", "run_all.sh"} <= set(res["decks"])
+    work = Path(httpd.app.workdir)
+    deck = (work / job / "decks" / "tt_0p80v_25c.scs").read_text()
+    assert ".include 'sram_demo.cdl'" in deck and ".include 'races.meas'" in deck
+    assert str(work) not in deck
+    # default (serve): absolute paths, nothing bundled
+    res = j(call(base, "POST", "/api/decks", {"job": job, "corners": corners, "sim": "hspice"}))
+    assert res["portable"] is False and "races.meas" not in res["decks"]
+    deck = (work / job / "decks" / "tt_0p80v_25c.sp").read_text()
+    assert str(work / job / "out" / "races.meas") in deck

@@ -24,7 +24,13 @@ racepath はトランジスタレベルのネットリスト(CDL/Spectre)から�
   解析 → レポート内のタップ → デッキ作成 → 集計 → 過去の解析の再表示が通ること、
   PC幅とスマホ幅(ダークモードも)で横スクロールが出ないことを確認する。
   画面の処理は既存のサブコマンドを呼ぶだけにして、検出ロジックを web.py に書かない。
-- **依存ライブラリは増やさない。** 標準ライブラリのみ。PyYAML は任意(`[yaml]` extra、YAML 設定を読むときだけ import)。
+  `INDEX_HTML` はオフライン版(`dist/racepath.html`)と共通なので、オフライン版も組み立てて確かめる:
+  ```bash
+  .venv/bin/python scripts/build_offline_html.py && node scripts/check_offline_html.js dist/racepath.html
+  ```
+- **オフライン版はネットワークに一切アクセスしない。** 外部の CDN やフォントを足さない。Pyodide の版を上げるときは
+  `scripts/build_offline_html.py` の版とチェックサムを両方更新する。
+- **依存ライブラリは増やさない。** 標準ライブラリのみ(オフライン版に埋め込む Pyodide は実行時の依存ではない)。PyYAML は任意(`[yaml]` extra、YAML 設定を読むときだけ import)。
   対応 Python は 3.9 以上。
 - **誤分類の報告を受けたら、テストを先に書いてから直す。**
   1. 再現する最小ネットリストを `tests/cases/` に追加する

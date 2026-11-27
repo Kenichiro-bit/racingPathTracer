@@ -26,6 +26,25 @@ cd racepath && scripts/install_skill.sh
 このリポジトリの `skill/racepath` へのシンボリックリンクにします(既に実体のフォルダがある場合は上書きせずに止まります)。
 venv に入れたい場合は `PYTHON=.venv/bin/python scripts/install_skill.sh` のように指定します。
 
+## いちばん簡単な使い方:オフライン版(HTML 1ファイル)
+
+[Releases](https://github.com/Kenichiro-bit/racingPathTracer/releases) から `racepath.html` をダウンロードし、ダブルクリックで開きます。
+ネットリストを選んで「解析する」を押すだけです。**インストール・サーバー・インターネット接続はいりません。**
+
+- 解析はすべてブラウザの中(Pyodide = ブラウザで動く Python)で行い、ネットリストを外部に送信しません。
+- 画面とできることは `racepath serve` と同じです(解析・レポート・ダウンロード・デッキ作成・集計)。ただし PC 上のパスは指定できないので、ファイルを選んでください。
+- デッキの zip にはネットリストと `races.meas` が入っていて、zip を展開したフォルダで `run_all.sh` を実行すればそのまま動きます。
+- 新しい Chrome / Edge / Firefox / Safari で動きます。初回の起動に数秒かかります。約10万Tr のネットリストで解析は数秒です。
+- 開いている間だけ結果を保持します(ページを閉じると消えるので、必要なファイルはダウンロードしてください)。
+
+自分で組み立てる場合(Pyodide 0.29.5 を npm レジストリから1回だけ取得します):
+
+```bash
+python scripts/build_offline_html.py
+```
+
+`dist/racepath.html` ができます。
+
 ## ブラウザで使う(`racepath serve`)
 
 ```bash
@@ -36,6 +55,7 @@ racepath serve
 
 1. **解析**:ネットリストをドロップするか、PC上のパスを入力して「解析する」。トップセル・起点・形式・プローブの接頭辞・設定(JSON)・`--no-group` も指定できます。結果の要約、警告、`report.html`(ノードのタップで測定文へ移動)と、出力ファイルのダウンロードリンクが出ます。
 2. **コーナーデッキ**:コーナー定義(JSON)を書き換えて「デッキを作る」。zip でダウンロードし、`run_all.sh` は手元で実行します(画面からシミュレーションは実行しません)。
+   別のPCで実行するなら「ネットリストと races.meas を zip に入れる」にチェックを入れます。
 3. **集計**:シミュレーション結果のフォルダを選ぶ(測定結果のファイルだけが送られます)か、パスを入力して「集計する」。判定が先頭に来る表と `summary.csv` が出ます。
 
 過去の解析は「過去の解析」から開き直せます。データは作業フォルダ `racepath_web/` に残ります。
@@ -171,11 +191,11 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev,yaml]"
 リポジトリ構成:
 
 ```text
-src/racepath/        CLI 本体(cli.py)とブラウザ画面(web.py)
+src/racepath/        CLI 本体(cli.py)、ジョブ管理(jobs.py)、ブラウザ画面(web.py)
 tests/               受け入れテスト、合成アレイ生成(gen_array.py)、誤分類の再現ケース(cases/)
 examples/            デモネットリスト(CDL / Spectre)とコーナー定義
 skill/racepath/      Claude Code スキル
-scripts/             install_skill.sh
+scripts/             install_skill.sh、オフライン版の組み立て(build_offline_html.py)と確認(check_offline_html.js)
 docs/BUILD_SPEC.md   仕様書
 ```
 

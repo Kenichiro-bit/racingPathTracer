@@ -182,5 +182,14 @@ XLAT SAT CKBI CKI Q VDD VSS LATCH
   2. デッキ作成:コーナー定義JSON(既定値は `examples/corners.json` と同じ)とシミュレータを指定し、`decks/` を作って zip で渡す。シミュレーションは実行しない。
   3. 集計:結果ファイルのアップロード(フォルダ選択可。測定結果の拡張子 `.mt* .ms* .measure .lis .log .out` だけを送り、フォルダ構成を保つので `tran1` の場合も親フォルダ名でコーナー名が決まる)か、パス指定。警告閾値を指定できる。表は判定の列を先頭側に並べる(`summary.csv` の列順はCLIのまま)。
   4. 過去の解析の一覧と再表示。
+- デッキ作成では「ネットリストと races.meas を zip に入れ、ファイル名で参照する」(portable)を選べる。選んだ場合は `decks/` にネットリストのコピーと `races.meas` を置き、デッキ内の絶対パスをファイル名に置き換える。
 - 作業フォルダの1回の解析ごとにジョブフォルダ(`<日時>_<ネットリスト名>`)を作り、ネットリスト(アップロード時)、`out/`、`decks/`、`decks.zip`、`results/`、`summary.csv`、`analyze.log`、`job.json` を置く。
 - 安全対策:既定で `127.0.0.1` のみで待ち受ける。起動ごとのランダムなトークンを全APIで必須にし(他サイトからの操作を防ぐ)、ループバック時は Host ヘッダーを確認する(DNSリバインディング対策)。ダウンロードできるのはジョブフォルダ内の出力ファイルだけ。アップロードされたファイル名は無害化し、ジョブフォルダの外に書かない。
+
+## 10. オフライン版 `racepath.html`(v0.3.0)
+- HTML 1ファイルで、インストール・サーバー・ネット接続なしに `file://` で開いて動くこと。対応ブラウザは新しい Chrome / Edge / Firefox / Safari(`DecompressionStream` と WebAssembly が必要)。
+- 画面は `serve` と同じ `INDEX_HTML` を使い、`window.racepathLocal` があれば HTTP の代わりにそれを呼ぶ。オフライン版ではパス指定のタブを隠し、デッキの portable を常に有効にする。
+- 解析は Pyodide(固定版 0.29.5、npm レジストリの tarball を SHA-256 で確認)の中で `racepath.jobs.App` を動かして行う。検出ロジックは CLI と同じコードで、JavaScript に書き直さない。
+- Pyodide の wasm・標準ライブラリ zip・JS・lock ファイルと、racepath の `__init__.py` `cli.py` `jobs.py` を gzip + base64 で埋め込む。`fetch` を差し替えて Pyodide のファイル取得を埋め込みデータで返し、JS は Blob URL から読み込む(`file://` では同じフォルダのファイルを読めないため)。
+- ネットワークへのリクエストは一切しない(確認スクリプトで外部リクエスト0件を検査する)。Pyodide(MPL-2.0)と CPython 標準ライブラリ(PSF License)を含む旨をページに表示する。
+- 組み立ては `scripts/build_offline_html.py`、ブラウザでの確認は `scripts/check_offline_html.js`(PC幅とスマホ幅・ダークモードで、解析 → レポート内のタップ → ダウンロード → デッキ → 集計 → 再表示)。CI で毎回実行し、`v*` タグではリリースに添付する。
