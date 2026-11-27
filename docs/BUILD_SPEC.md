@@ -182,5 +182,17 @@ XLAT SAT CKBI CKI Q VDD VSS LATCH
   2. デッキ作成:コーナー定義JSON(既定値は `examples/corners.json` と同じ)とシミュレータを指定し、`decks/` を作って zip で渡す。シミュレーションは実行しない。
   3. 集計:結果ファイルのアップロード(フォルダ選択可。測定結果の拡張子 `.mt* .ms* .measure .lis .log .out` だけを送り、フォルダ構成を保つので `tran1` の場合も親フォルダ名でコーナー名が決まる)か、パス指定。警告閾値を指定できる。表は判定の列を先頭側に並べる(`summary.csv` の列順はCLIのまま)。
   4. 過去の解析の一覧と再表示。
+- デッキ作成では「ネットリストと races.meas を zip に入れ、ファイル名で参照する」(portable)を選べる。選んだ場合は `decks/` にネットリストのコピーと `races.meas` を置き、デッキ内の絶対パスをファイル名に置き換える。
 - 作業フォルダの1回の解析ごとにジョブフォルダ(`<日時>_<ネットリスト名>`)を作り、ネットリスト(アップロード時)、`out/`、`decks/`、`decks.zip`、`results/`、`summary.csv`、`analyze.log`、`job.json` を置く。
 - 安全対策:既定で `127.0.0.1` のみで待ち受ける。起動ごとのランダムなトークンを全APIで必須にし(他サイトからの操作を防ぐ)、ループバック時は Host ヘッダーを確認する(DNSリバインディング対策)。ダウンロードできるのはジョブフォルダ内の出力ファイルだけ。アップロードされたファイル名は無害化し、ジョブフォルダの外に書かない。
+
+## 10. 1ファイル版 `racepath.html`(v0.3.0)
+- HTML 1ファイル(数百KB)で、インストール・サーバー・ネット接続なしに `file://` で開いて動くこと。対応ブラウザは新しい Chrome / Edge / Firefox / Safari。
+- 解析は **JavaScript 版のエンジン** `src/racepath/js/racepath.js` で行う。これは `cli.py` の analyze / decks / collect を移植したもので、**出力(races.json / races.meas / races_params.inc / races.csv / report.html / デッキ / 集計CSV / コンソール出力)が Python 版とバイト単位で一致すること**を要件とする。
+  - 一致テスト `tests/test_js_parity.py`:デモ回路(CDL・Spectre)、各種オプション、設定(extra_checks・ignore_nets・max_races)、合成アレイ、ランダム回路40種、decks(spectre/hspice、各種コーナー設定)、collect(spectre形式・mt0・failed・隠しファイル・閾値)で両者を実行し、全ファイルとコンソール出力を比較する。
+  - Python 固有の振る舞い(float の repr、`html.escape`、csv の引用、`json.dump(indent=1)`、`os.path.commonprefix`、`fnmatch`、`splitlines`、`rstrip` など)も再現する。
+  - 既知の差:設定 JSON に `1.0` のような整数値の小数を書くと、Python は `1.0`、JavaScript は `1` と表記する(値は同じ)。YAML の設定は読まない。
+- ブラウザ内のジョブ管理 `src/racepath/js/jobs.js` は `racepath.jobs.App` と同じ API を持ち、メモリだけで動く。デッキは常にネットリストと races.meas を同梱し、ファイル名で参照する(zip は無圧縮で自前生成)。
+- 画面は `serve` と同じ `INDEX_HTML` を使い、`window.racepathLocal` があれば HTTP の代わりにそれを呼ぶ。パス指定のタブは隠す。
+- 組み立ては `scripts/build_offline_html.py`(出力は決定的)。リポジトリ直下の `racepath.html` はコミットし、CI と pytest で最新のソースと一致することを確かめる。
+- ネットワークへのリクエストは一切しない。ブラウザでの確認は `scripts/check_offline_html.js`(ネットワーク遮断、PC幅とスマホ幅・ダークモードで、解析 → レポート内のタップ → ダウンロード → デッキ → 集計 → 再表示)。CI で毎回実行し、`v*` タグではリリースに `racepath.html` を添付する。

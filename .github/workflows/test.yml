@@ -50,3 +50,58 @@ jobs:
           racepath analyze examples/sram_demo.cdl -o "$OUT/rp" | tee "$OUT/rp.txt"
           grep -q "races: 6" "$OUT/rp.txt"
           test -s "$OUT/rp/report.html"
+
+  # racepath.html (single-file build): the committed file must match the sources, the
+  # JavaScript engine must match the Python CLI byte for byte, and the page must work when
+  # opened from file:// in Chromium with all network access blocked.
+  racepath-html:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          npm install --no-save playwright@1.63.0
+          # the runner's preinstalled Microsoft apt source sometimes answers 403 and breaks
+          # apt-get update; it is not needed here
+          sudo rm -f /etc/apt/sources.list.d/microsoft*
+          npx playwright install --with-deps chromium
+      - name: racepath.html is up to date
+        run: python scripts/build_offline_html.py --check
+      - name: Python / JavaScript parity
+        run: pytest -v tests/test_js_parity.py tests/test_js_jobs.py tests/test_offline_build.py
+      - name: End-to-end check in the browser (offline)
+        run: node scripts/check_offline_html.js racepath.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: racepath-html
+          path: racepath.html
+          if-no-files-found: error
+
+  # On a version tag, attach racepath.html to the GitHub release (created if missing).
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [pytest, pytest-py39, racepath-html]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" racepath.html --clobber
+          else
+            gh release create "$TAG" --generate-notes racepath.html
+          fi

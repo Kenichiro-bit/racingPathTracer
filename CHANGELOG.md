@@ -2,6 +2,20 @@
 
 このプロジェクトは [Semantic Versioning](https://semver.org/lang/ja/) に従います。
 
+## [0.3.0] - 2026-11-27
+
+### 追加
+- **`racepath.html`**:開くだけで使える1ファイル版(約110KB)。ネットリストを選んで「解析する」を押すだけで、インストール・サーバー・インターネット接続なしに解析・レポート・ダウンロード・デッキ作成・集計ができる。画面は `racepath serve` と同じ。リポジトリ直下に置き、Releases にも添付する。
+- **JavaScript 版の解析エンジン** `src/racepath/js/racepath.js`:Python 版(cli.py)の移植。出力が Python 版とバイト単位で一致することを一致テストで毎回確かめる。約10万Tr を1秒程度で解析する。
+- `src/racepath/js/jobs.js`:ブラウザ内のジョブ管理(メモリのみ、デッキ zip の生成)。
+- テスト:Python/JS 一致テスト(デモ・オプション・設定・アレイ・ランダム回路40種・decks・collect)、ブラウザ内ジョブ管理のテスト、`racepath.html` が最新か確かめるテスト。`tests/gen_random.py`(ランダム回路の生成)。
+- `scripts/build_offline_html.py`(組み立て・`--check`)と `scripts/check_offline_html.js`(`file://` でネット遮断のまま全工程を確認)。
+- CI:一致テストと `racepath.html` のブラウザ確認を毎回実行し、`v*` タグの push でリリースに `racepath.html` を自動添付する。
+- デッキ作成に「ネットリストと races.meas を zip に入れてファイル名で参照する」オプション(`serve` の画面で選択可。`racepath.html` では常に有効)。
+
+### 変更
+- 解析・デッキ・集計のジョブ管理を `racepath/jobs.py` に分離し、HTTP サーバー(web.py)から独立させた。検出ロジックと出力形式は変更なし。
+
 ## [0.2.0] - 2026-11-27
 
 ### 追加
