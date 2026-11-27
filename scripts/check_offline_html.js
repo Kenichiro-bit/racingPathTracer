@@ -1,14 +1,14 @@
-// End-to-end check of the offline single-file build (dist/racepath.html).
+// End-to-end check of the single-file build (racepath.html).
 // Opens it from file:// with ALL network access blocked, then runs
 // analyze -> tap inside report -> decks (zip download) -> collect, on desktop and phone width.
 //
-// usage: node scripts/check_offline_html.js dist/racepath.html [screenshot_dir]
+// usage: node scripts/check_offline_html.js [racepath.html] [screenshot_dir]
 const { chromium, devices } = require('playwright');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const html = path.resolve(process.argv[2] || 'dist/racepath.html');
+const html = path.resolve(process.argv[2] || path.join(__dirname, '..', 'racepath.html'));
 const shots = process.argv[3];
 const root = path.resolve(__dirname, '..');
 const netlist = path.join(root, 'examples', 'sram_demo.cdl');

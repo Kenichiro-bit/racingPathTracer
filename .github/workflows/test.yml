@@ -51,9 +51,10 @@ jobs:
           grep -q "races: 6" "$OUT/rp.txt"
           test -s "$OUT/rp/report.html"
 
-  # Single-file offline build (dist/racepath.html): build it, then open it from
-  # file:// in Chromium with all network access blocked and run the whole flow.
-  offline-html:
+  # racepath.html (single-file build): the committed file must match the sources, the
+  # JavaScript engine must match the Python CLI byte for byte, and the page must work when
+  # opened from file:// in Chromium with all network access blocked.
+  racepath-html:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -69,30 +70,27 @@ jobs:
           pip install -e ".[dev]"
           npm install --no-save playwright@1.63.0
           npx playwright install --with-deps chromium
-      - name: Build dist/racepath.html
-        run: python scripts/build_offline_html.py
-      - name: pytest (build checks)
-        run: pytest -v tests/test_offline_build.py
+      - name: racepath.html is up to date
+        run: python scripts/build_offline_html.py --check
+      - name: Python / JavaScript parity
+        run: pytest -v tests/test_js_parity.py tests/test_js_jobs.py tests/test_offline_build.py
       - name: End-to-end check in the browser (offline)
-        run: node scripts/check_offline_html.js dist/racepath.html
+        run: node scripts/check_offline_html.js racepath.html
       - uses: actions/upload-artifact@v4
         with:
-          name: racepath-offline-html
-          path: dist/racepath.html
+          name: racepath-html
+          path: racepath.html
           if-no-files-found: error
 
   # On a version tag, attach racepath.html to the GitHub release (created if missing).
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [pytest, pytest-py39, offline-html]
+    needs: [pytest, pytest-py39, racepath-html]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: racepath-offline-html
-          path: dist
+      - uses: actions/checkout@v5
       - name: Create or update the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,7 +98,7 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" dist/racepath.html --clobber
+            gh release upload "$TAG" racepath.html --clobber
           else
-            gh release create "$TAG" --generate-notes dist/racepath.html
+            gh release create "$TAG" --generate-notes racepath.html
           fi

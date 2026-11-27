@@ -445,10 +445,10 @@ if(LOCAL){
   // offline build: no access to local paths, decks are always self-contained
   [].forEach.call(document.querySelectorAll(".srv-only"), function(e){ e.classList.add("hidden"); });
   $("d-portable").checked = true; $("d-portable").disabled = true;
-  var boot = $("boot"), ab = $("btn-analyze");
-  boot.classList.remove("hidden"); ab.disabled = true;
-  boot.textContent = "解析エンジン(ブラウザ内の Python)を準備しています…(初回は数秒〜十数秒)";
-  LOCAL.ready.then(function(){ boot.classList.add("hidden"); ab.disabled = false; },
+  var boot = $("boot"), ab = $("btn-analyze"), booted = false;
+  ab.disabled = true;
+  setTimeout(function(){ if(!booted){ boot.classList.remove("hidden"); boot.textContent = "解析エンジンを準備しています…"; } }, 300);
+  LOCAL.ready.then(function(){ booted = true; boot.classList.add("hidden"); ab.disabled = false; },
     function(e){ boot.className = "boot err"; boot.textContent = "解析エンジンを起動できませんでした: " + e.message; });
 }
 

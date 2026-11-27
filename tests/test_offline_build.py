@@ -1,46 +1,32 @@
-"""Build check for the offline single-file HTML (scripts/build_offline_html.py).
+"""Checks for the single-file build (racepath.html, scripts/build_offline_html.py).
 
-Needs the pinned Pyodide tarball in build/ (it is downloaded by the build script);
-skipped otherwise. The in-browser end-to-end check is scripts/check_offline_html.js (run in CI).
+The in-browser end-to-end check is scripts/check_offline_html.js (Playwright, run in CI).
 """
-import json
 import re
 import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "scripts"))
-import build_offline_html as b  # noqa: E402
-
-TARBALL = ROOT / "build" / f"pyodide-{b.PYODIDE_VERSION}.tgz"
+BUILD = ROOT / "scripts" / "build_offline_html.py"
 
 
-@pytest.mark.skipif(not TARBALL.is_file(), reason="Pyodide tarball not downloaded")
-def test_build_offline_html(tmp_path):
+def test_committed_racepath_html_is_up_to_date():
+    # racepath.html at the repo root is what users double-click; it must match the sources
+    p = subprocess.run([sys.executable, str(BUILD), "--check"], capture_output=True, text=True)
+    assert p.returncode == 0, p.stdout + p.stderr + "\n-> run: python scripts/build_offline_html.py"
+
+
+def test_build_is_self_contained(tmp_path):
     out = tmp_path / "racepath.html"
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "build_offline_html.py"),
-                    "--tarball", str(TARBALL), "-o", str(out)], check=True)
+    subprocess.run([sys.executable, str(BUILD), "-o", str(out)], check=True)
     html = out.read_text(encoding="utf-8")
-    assert out.stat().st_size < 12_000_000
-    assert "<!--LOCAL_BACKEND-->" not in html and "__TOKEN__" not in html and "__VERSION__" not in html
-    assert "racepath オフライン版" in html and "Mozilla Public License" in html
-    m = re.search(r'<script type="application/json" id="rp-assets">(.*?)</script>', html, re.S)
-    assets = json.loads(m.group(1))
-    assert set(assets["pyodide"]) == set(b.PYODIDE_FILES)
-    assert set(assets["racepath"]) == set(b.RACEPATH_FILES)
-    assert "def rp_call" in assets["bridge"]
-    # every embedded racepath source matches the working tree
-    import base64
-    import gzip
-    for name, data in assets["racepath"].items():
-        assert gzip.decompress(base64.b64decode(data)) == (ROOT / "src" / "racepath" / name).read_bytes()
-
-
-def test_bad_tarball_is_rejected(tmp_path):
-    bad = tmp_path / "pyodide.tgz"
-    bad.write_bytes(b"not a tarball")
-    with pytest.raises(SystemExit, match="checksum"):
-        b.read_pyodide(str(bad))
+    assert out.stat().st_size < 500_000
+    assert html == (ROOT / "racepath.html").read_text(encoding="utf-8")   # deterministic
+    for marker in ("<!--LOCAL_BACKEND-->", "__TOKEN__", "__VERSION__"):
+        assert marker not in html
+    # no external resources: everything is inline
+    assert not re.search(r'<(script|link|img|iframe)[^>]+(src|href)="(https?:)?//', html, re.I)
+    # exactly the page's own three inline scripts are closed
+    assert html.count("</script>") == 3
+    assert "RacepathJobs.install(window)" in html and "racepathLocal" in html

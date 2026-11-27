@@ -26,24 +26,20 @@ cd racepath && scripts/install_skill.sh
 このリポジトリの `skill/racepath` へのシンボリックリンクにします(既に実体のフォルダがある場合は上書きせずに止まります)。
 venv に入れたい場合は `PYTHON=.venv/bin/python scripts/install_skill.sh` のように指定します。
 
-## いちばん簡単な使い方:オフライン版(HTML 1ファイル)
+## いちばん簡単な使い方:`racepath.html` を開くだけ
 
-[Releases](https://github.com/Kenichiro-bit/racingPathTracer/releases) から `racepath.html` をダウンロードし、ダブルクリックで開きます。
-ネットリストを選んで「解析する」を押すだけです。**インストール・サーバー・インターネット接続はいりません。**
+リポジトリ直下の **`racepath.html`** をダブルクリックで開き、ネットリストを選んで(ドロップして)「解析する」を押すだけです。
+**インストール・サーバー・インターネット接続はいりません。** ファイルは約110KB で、すぐに開きます。
+clone していなければ、[Releases](https://github.com/Kenichiro-bit/racingPathTracer/releases) から `racepath.html` だけをダウンロードしても使えます。
 
-- 解析はすべてブラウザの中(Pyodide = ブラウザで動く Python)で行い、ネットリストを外部に送信しません。
-- 画面とできることは `racepath serve` と同じです(解析・レポート・ダウンロード・デッキ作成・集計)。ただし PC 上のパスは指定できないので、ファイルを選んでください。
-- デッキの zip にはネットリストと `races.meas` が入っていて、zip を展開したフォルダで `run_all.sh` を実行すればそのまま動きます。
-- 新しい Chrome / Edge / Firefox / Safari で動きます。初回の起動に数秒かかります。約10万Tr のネットリストで解析は数秒です。
-- 開いている間だけ結果を保持します(ページを閉じると消えるので、必要なファイルはダウンロードしてください)。
+- 解析はすべてブラウザの中(JavaScript)で行い、ネットリストを外部に送信しません。
+- 結果は Python のコマンド版と同じです(同じ出力になることをテストで毎回確かめています)。約10万Tr のネットリストも1秒程度で解析します。
+- 画面とできることは `racepath serve` と同じです(解析・レポート・ダウンロード・デッキ作成・集計)。PC 上のパスは指定できないので、ファイルを選んでください。
+- デッキの zip にはネットリストと `races.meas` が入っていて、展開したフォルダで `run_all.sh` を実行すればそのまま動きます。
+- 新しい Chrome / Edge / Firefox / Safari で動きます。結果はページを開いている間だけ保持されます(必要なファイルはダウンロードしてください)。
+- 設定は JSON のみ対応です(YAML はコマンド版で使えます)。
 
-自分で組み立てる場合(Pyodide 0.29.5 を npm レジストリから1回だけ取得します):
-
-```bash
-python scripts/build_offline_html.py
-```
-
-`dist/racepath.html` ができます。
+`racepath.html` は `src/racepath/js/` と画面のソースから `python scripts/build_offline_html.py` で組み立てたものです。直接編集しないでください。
 
 ## ブラウザで使う(`racepath serve`)
 
@@ -192,10 +188,12 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev,yaml]"
 
 ```text
 src/racepath/        CLI 本体(cli.py)、ジョブ管理(jobs.py)、ブラウザ画面(web.py)
-tests/               受け入れテスト、合成アレイ生成(gen_array.py)、誤分類の再現ケース(cases/)
+tests/               受け入れテスト、Python/JS 一致テスト、合成アレイ・ランダム回路の生成、誤分類の再現ケース(cases/)
 examples/            デモネットリスト(CDL / Spectre)とコーナー定義
 skill/racepath/      Claude Code スキル
-scripts/             install_skill.sh、オフライン版の組み立て(build_offline_html.py)と確認(check_offline_html.js)
+src/racepath/js/     JavaScript 版の解析エンジン(racepath.js)とブラウザ内のジョブ管理(jobs.js)
+racepath.html        1ファイル版(組み立て済み。開くだけで使える)
+scripts/             install_skill.sh、racepath.html の組み立て(build_offline_html.py)と確認(check_offline_html.js)
 docs/BUILD_SPEC.md   仕様書
 ```
 
