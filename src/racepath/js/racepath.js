@@ -11,7 +11,7 @@
 (function (root) {
 "use strict";
 
-var VERSION = "0.6.0";  // must equal racepath.__version__ (checked by tests)
+var VERSION = "0.7.0";  // must equal racepath.__version__ (checked by tests)
 
 var DEFAULT_CFG = {
   supplies: ["VDD*", "VSS*", "GND*", "VCC*", "VPWR*", "VGND*", "VPP*", "VBB*",
@@ -749,11 +749,12 @@ function groupRaces(races) {
   return order;
 }
 function stageParityNote(n) { return n % 2 === 0 ? "同相" : "逆相"; }
-// console wording: stages counted from the divergence point
+// 'CLKBUF → WLB → WL0'; a one-net path is the divergence point itself
+function pathText(nets) { return nets.length > 1 ? nets.join(" → ") : (nets.length ? nets[0] : "") + "(分岐点そのもの)"; }
+// console wording: the two paths from the divergence point
 function stageSummary(r) {
   if (r.manual) return r.a + " / " + r.b + "(手動)";
-  var one = function (net, n) { return net + " " + n + "段" + (n === 0 ? "(分岐点そのもの)" : ""); };
-  return "分岐点 " + r.divergence + " から " + one(r.a, r.stages_a) + " / " + one(r.b, r.stages_b) + "(差" + r.stage_diff + "段)";
+  return "A: " + pathText(r.path_a) + " / B: " + pathText(r.path_b);
 }
 
 function classify(G, T, a, b, hasFb) {
@@ -922,12 +923,8 @@ function measureLines(r, prefix, sup) {
   if (r.manual) {
     L.push("*   " + Object.keys(p).map(function (k) { return k + "=" + pyStr(p[k]); }).join(", "));
   } else {
-    var src = (r.sources && r.sources.length) ? r.sources[0] : "起点";
-    var one = function (net, n, edge) {
-      return n === 0 ? net + " は分岐点そのもの(0段、" + src + " と" + edge + ")" : net + " まで" + n + "段(" + src + " と" + edge + ")";
-    };
-    L.push("*   分岐点 " + r.divergence + " から " + one(r.a, r.stages_a, r.edge_a) + "、" +
-      one(r.b, r.stages_b, r.edge_b) + "、差" + r.stage_diff + "段");
+    L.push("*   A: " + pathText(r.path_a));
+    L.push("*   B: " + pathText(r.path_b));
     if (r.explain) L.push("*   NG条件: " + r.explain);
     if ((r.group_size || 1) > 1) {
       L.push("*   同型の競合 " + r.group_size + "件の代表 (全件は races.json の group_members / --no-group)");
@@ -1015,10 +1012,10 @@ function explainRace(r, cfg) {
 
 function racesCsv(races) {
   var out = "\ufeff" + csvRow(["id", "pins", "ccc", "input_a", "input_b", "divergence",
-    "stages_a", "stages_b", "stage_diff", "derived", "group_size", "probes", "path_a", "path_b"]);
+    "derived", "group_size", "probes", "path_a", "path_b"]);
   races.forEach(function (r) {
     out += csvRow([r.id, (r.pins || []).join(" "), r.ccc_label, r.a, r.b,
-      r.divergence, r.stages_a, r.stages_b, r.stage_diff, r.derived, r.group_size || 1,
+      r.divergence, r.derived, r.group_size || 1,
       Object.keys(r.probes).map(function (k) { return k + "=" + pyStr(r.probes[k]); }).join("; "),
       r.path_a.join(" -> "), r.path_b.join(" -> ")]);
   });
@@ -1065,9 +1062,9 @@ function reportHtml(races, meta, pins) {
     var paths;
     if (r.manual) paths = "";
     else paths = '<div class="paths">\n' +
-      '<div class="pl"><span class="lab">A</span><span class="chain">' + chain(r.path_a, rid) + '</span><span class="st">' + r.stages_a + "段</span></div>\n" +
-      '<div class="pl"><span class="lab">B</span><span class="chain">' + chain(r.path_b, rid) + '</span><span class="st">' + r.stages_b + "段</span></div>\n" +
-      '<div class="sub">分岐点 ' + netlink(r.divergence, rid) + " から数えた段数(差" + r.stage_diff + "段) ・ 合流 " + esc(r.ccc_label) + "</div></div>";
+      '<div class="pl"><span class="lab">A</span><span class="chain">' + chain(r.path_a, rid) + "</span></div>\n" +
+      '<div class="pl"><span class="lab">B</span><span class="chain">' + chain(r.path_b, rid) + "</span></div>\n" +
+      '<div class="sub">分岐点 ' + netlink(r.divergence, rid) + " ・ 合流 " + esc(r.ccc_label) + "</div></div>";
     cards[rid] = '<section class="card" id="r-' + rid + '">\n' +
       '<header><a class="rid" href="#m-' + rid + '">' + rid + "</a>" + flagHtml + "</header>\n" +
       '<div class="sub">' + esc(pinsText(r)) + "</div>\n" +
@@ -1163,7 +1160,7 @@ details{margin:10px 0;font-size:13px}
 <div class="meta">${esc(meta.netlist)} (${meta.format}) ・ Tr ${meta.n_mos} ・ CCC ${meta.n_ccc} ・
 起点 ${esc(meta.sources.join(', '))}${staticHtml} ・ 競合 ${races.length}件</div>
 <div>${summary}</div>${warn}
-<p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。段数は、分岐点(2本の経路が分かれる最後の共通ネット)から、合流するブロックの入力までに通る論理段の数です。インバータや NAND など、チャネルでつながったトランジスタのまとまり(CCC)1つを1段と数えます。0段はその入力が分岐点そのものであることを、同相/逆相は起点(CLK など)から見た信号の向きを表します。</p>
+<p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。A・B は、分岐点(2本の経路が分かれる最後の共通ネット)から、合流するブロックの入力までの経路です。</p>
 ${sections.join('')}
 <h2>測定文 (races.meas)</h2>
 ${blocks.join('')}

@@ -710,16 +710,17 @@ def stage_parity_note(n):
     return "同相" if n % 2 == 0 else "逆相"
 
 
+def path_text(nets):
+    """'CLKBUF → WLB → WL0'; a one-net path is the divergence point itself."""
+    return " → ".join(nets) if len(nets) > 1 else f"{nets[0] if nets else ''}(分岐点そのもの)"
+
+
 def stage_summary(r):
-    """Console wording: stages counted from the divergence point, e.g.
-    '分岐点 CLKBUF から SAE 6段 / WL0 2段(差4段)'."""
+    """Console wording: the two paths from the divergence point, e.g.
+    'A: CLKBUF → WLB → WL0 / B: CLKBUF → PREB → PRE_N'."""
     if r.get("manual"):
         return f"{r['a']} / {r['b']}(手動)"
-
-    def one(net, n):
-        return f"{net} {n}段" + ("(分岐点そのもの)" if n == 0 else "")
-    return (f"分岐点 {r['divergence']} から {one(r['a'], r['stages_a'])} / {one(r['b'], r['stages_b'])}"
-            f"(差{r['stage_diff']}段)")
+    return f"A: {path_text(r['path_a'])} / B: {path_text(r['path_b'])}"
 
 
 def classify(G: CCCGraph, T, a, b, has_fb):
@@ -912,14 +913,8 @@ def measure_lines(r, prefix, sup):
     if r.get("manual"):
         L.append("*   " + ", ".join(f"{k}={v}" for k, v in p.items()))
     else:
-        src = r["sources"][0] if r.get("sources") else "起点"
-
-        def one(net, n, edge):
-            if n == 0:
-                return f"{net} は分岐点そのもの(0段、{src} と{edge})"
-            return f"{net} まで{n}段({src} と{edge})"
-        L.append(f"*   分岐点 {r['divergence']} から {one(r['a'], r['stages_a'], r['edge_a'])}、"
-                 f"{one(r['b'], r['stages_b'], r['edge_b'])}、差{r['stage_diff']}段")
+        L.append(f"*   A: {path_text(r['path_a'])}")
+        L.append(f"*   B: {path_text(r['path_b'])}")
         if r.get("explain"):
             L.append(f"*   NG条件: {r['explain']}")
         if r.get("group_size", 1) > 1:
@@ -1013,10 +1008,10 @@ def write_csv(races, path):
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         w.writerow(["id", "pins", "ccc", "input_a", "input_b", "divergence",
-                    "stages_a", "stages_b", "stage_diff", "derived", "group_size", "probes", "path_a", "path_b"])
+                    "derived", "group_size", "probes", "path_a", "path_b"])
         for r in races:
             w.writerow([r["id"], " ".join(r.get("pins", [])), r["ccc_label"], r["a"], r["b"],
-                        r["divergence"], r["stages_a"], r["stages_b"], r["stage_diff"], r["derived"],
+                        r["divergence"], r["derived"],
                         r.get("group_size", 1),
                         "; ".join(f"{k}={v}" for k, v in r["probes"].items()),
                         " -> ".join(r["path_a"]), " -> ".join(r["path_b"])])
@@ -1086,9 +1081,9 @@ def write_html(races, meta, path, pins):
             paths = ""
         else:
             paths = f"""<div class="paths">
-<div class="pl"><span class="lab">A</span><span class="chain">{_chain(r['path_a'], rid)}</span><span class="st">{r['stages_a']}段</span></div>
-<div class="pl"><span class="lab">B</span><span class="chain">{_chain(r['path_b'], rid)}</span><span class="st">{r['stages_b']}段</span></div>
-<div class="sub">分岐点 {_netlink(r['divergence'], rid)} から数えた段数(差{r['stage_diff']}段) ・ 合流 {html.escape(r['ccc_label'])}</div></div>"""
+<div class="pl"><span class="lab">A</span><span class="chain">{_chain(r['path_a'], rid)}</span></div>
+<div class="pl"><span class="lab">B</span><span class="chain">{_chain(r['path_b'], rid)}</span></div>
+<div class="sub">分岐点 {_netlink(r['divergence'], rid)} ・ 合流 {html.escape(r['ccc_label'])}</div></div>"""
         cards[rid] = f"""<section class="card" id="r-{rid}">
 <header><a class="rid" href="#m-{rid}">{rid}</a>{flag_html}</header>
 <div class="sub">{html.escape(_pins_text(r))}</div>
@@ -1178,7 +1173,7 @@ details{{margin:10px 0;font-size:13px}}
 <div class="meta">{html.escape(meta['netlist'])} ({meta['format']}) ・ Tr {meta['n_mos']} ・ CCC {meta['n_ccc']} ・
 起点 {html.escape(', '.join(meta['sources']))}{static} ・ 競合 {len(races)}件</div>
 <div>{summary}</div>{warn}
-<p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。段数は、分岐点(2本の経路が分かれる最後の共通ネット)から、合流するブロックの入力までに通る論理段の数です。インバータや NAND など、チャネルでつながったトランジスタのまとまり(CCC)1つを1段と数えます。0段はその入力が分岐点そのものであることを、同相/逆相は起点(CLK など)から見た信号の向きを表します。</p>
+<p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。A・B は、分岐点(2本の経路が分かれる最後の共通ネット)から、合流するブロックの入力までの経路です。</p>
 {''.join(sections)}
 <h2>測定文 (races.meas)</h2>
 {''.join(blocks)}

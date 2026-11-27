@@ -1,6 +1,7 @@
 """Acceptance tests for racepath (see docs/BUILD_SPEC.md section 7)."""
 import csv
 import json
+import re
 import os
 import subprocess
 import sys
@@ -189,20 +190,23 @@ def test_collect(demo, tmp_path):
     assert summary.read_bytes().startswith(b"\xef\xbb\xbf")
 
 
-# ---------------------------------------------------------------- stage wording (v0.5.0)
+# ---------------------------------------------------------------- paths only (v0.7.0)
 
-def test_stage_counts_are_described_from_the_divergence_point(demo, tmp_path):
+def test_paths_are_shown_without_stage_counts(demo, tmp_path):
     out, data = demo
     p = run("analyze", EXAMPLES / "sram_demo.cdl", "-o", tmp_path / "o")
-    assert "rp006 分岐点 CLKBUF から SAE 6段 / WL0 2段(差4段)  @ CCC#0" in p.stdout
-    assert "分岐点 CKI から CKBI 1段 / CKI 0段(分岐点そのもの)(差1段)" in p.stdout
+    assert "   rp006 A: CLKBUF → S1 → S2 → S3 → S4 → S5 → SAE / B: CLKBUF → WLB → WL0  @ CCC#0" in p.stdout
+    assert "   rp002 A: CKI → CKBI / B: CKI(分岐点そのもの)  @ CCC#16" in p.stdout
     meas = (out / "races.meas").read_text(encoding="utf-8")
-    assert "*   分岐点 CLKBUF から SAE まで6段(CLK と同相)、WL0 まで2段(CLK と同相)、差4段" in meas
-    assert "CKI は分岐点そのもの(0段、CLK と逆相)" in meas
-    assert "起点比" not in meas
+    assert "*   A: CLKBUF → S1 → S2 → S3 → S4 → S5 → SAE\n*   B: CLKBUF → WLB → WL0\n" in meas
+    assert "*   B: CKI(分岐点そのもの)" in meas
     html = (out / "report.html").read_text(encoding="utf-8")
-    assert "から数えた段数(差4段)" in html
+    assert '<div class="sub">分岐点 <a class="net"' in html and "合流 CCC#0" in html
     assert "分岐点(2本の経路が分かれる最後の共通ネット)" in html
-    # the numbers themselves are unchanged
+    hdr = (out / "races.csv").read_text(encoding="utf-8-sig").splitlines()[0]
+    assert "stages_a" not in hdr and "stage_diff" not in hdr
+    for text in (p.stdout, meas, html, hdr):
+        assert not re.search(r"\d段", text) and "同相" not in text and "逆相" not in text
+    # the numbers are still kept as data
     r = next(r for r in data["races"] if r["class"] == "sae_bl")
     assert (r["stages_a"], r["stages_b"], r["stage_diff"], r["path_a"][0]) == (6, 2, 4, "CLKBUF")
