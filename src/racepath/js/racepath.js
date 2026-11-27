@@ -11,7 +11,7 @@
 (function (root) {
 "use strict";
 
-var VERSION = "0.4.0";  // must equal racepath.__version__ (checked by tests)
+var VERSION = "0.5.0";  // must equal racepath.__version__ (checked by tests)
 
 var DEFAULT_CFG = {
   supplies: ["VDD*", "VSS*", "GND*", "VCC*", "VPWR*", "VGND*", "VPP*", "VBB*",
@@ -748,6 +748,12 @@ function groupRaces(races) {
   return order;
 }
 function stageParityNote(n) { return n % 2 === 0 ? "同相" : "逆相"; }
+// console wording: stages counted from the divergence point
+function stageSummary(r) {
+  if (r.manual) return r.a + " / " + r.b + "(手動)";
+  var one = function (net, n) { return net + " " + n + "段" + (n === 0 ? "(分岐点そのもの)" : ""); };
+  return "分岐点 " + r.divergence + " から " + one(r.a, r.stages_a) + " / " + one(r.b, r.stages_b) + "(差" + r.stage_diff + "段)";
+}
 
 function classify(G, T, a, b, hasFb) {
   var ra = G.inputRole(T, a), rb = G.inputRole(T, b);
@@ -915,8 +921,12 @@ function measureLines(r, prefix, sup) {
   if (r.manual) {
     L.push("*   " + Object.keys(p).map(function (k) { return k + "=" + pyStr(p[k]); }).join(", "));
   } else {
-    L.push("*   " + r.a + " (" + r.stages_a + "段, 起点比" + r.edge_a + ")  vs  " +
-      r.b + " (" + r.stages_b + "段, 起点比" + r.edge_b + ")" + (r.divergence ? "   分岐点 " + r.divergence : ""));
+    var src = (r.sources && r.sources.length) ? r.sources[0] : "起点";
+    var one = function (net, n, edge) {
+      return n === 0 ? net + " は分岐点そのもの(0段、" + src + " と" + edge + ")" : net + " まで" + n + "段(" + src + " と" + edge + ")";
+    };
+    L.push("*   分岐点 " + r.divergence + " から " + one(r.a, r.stages_a, r.edge_a) + "、" +
+      one(r.b, r.stages_b, r.edge_b) + "、差" + r.stage_diff + "段");
     if (r.explain) L.push("*   NG条件: " + r.explain);
     if ((r.group_size || 1) > 1) {
       L.push("*   同型の競合 " + r.group_size + "件の代表 (全件は races.json の group_members / --no-group)");
@@ -1056,7 +1066,7 @@ function reportHtml(races, meta) {
     else paths = '<div class="paths">\n' +
       '<div class="pl"><span class="lab">A</span><span class="chain">' + chain(r.path_a, rid) + '</span><span class="st">' + r.stages_a + "段</span></div>\n" +
       '<div class="pl"><span class="lab">B</span><span class="chain">' + chain(r.path_b, rid) + '</span><span class="st">' + r.stages_b + "段</span></div>\n" +
-      '<div class="sub">分岐点 ' + netlink(r.divergence, rid) + " ・ 合流 " + esc(r.ccc_label) + "</div></div>";
+      '<div class="sub">分岐点 ' + netlink(r.divergence, rid) + " から数えた段数(差" + r.stage_diff + "段) ・ 合流 " + esc(r.ccc_label) + "</div></div>";
     cards.push('<section class="card c-' + r["class"] + '" id="r-' + rid + '">\n' +
       '<header><a class="rid" href="#m-' + rid + '">' + rid + '</a><span class="tag t-' + r["class"] + '">' + cja + "</span>" + flagHtml + "</header>\n" +
       '<p class="ex">' + esc(r.explain || "") + "</p>\n" +
@@ -1131,7 +1141,7 @@ details{margin:10px 0;font-size:13px}
 <div class="meta">${esc(meta.netlist)} (${meta.format}) ・ Tr ${meta.n_mos} ・ CCC ${meta.n_ccc} ・
 起点 ${esc(meta.sources.join(', '))}${staticHtml} ・ 競合 ${races.length}件</div>
 <div>${summary}</div>${warn}
-<p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。段数はチャネル接続ブロック(CCC)単位の最短経路です。</p>
+<p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。段数は、分岐点(2本の経路が分かれる最後の共通ネット)から、合流するブロックの入力までに通る論理段の数です。インバータや NAND など、チャネルでつながったトランジスタのまとまり(CCC)1つを1段と数えます。0段はその入力が分岐点そのものであることを、同相/逆相は起点(CLK など)から見た信号の向きを表します。</p>
 ${cards.join('')}
 <h2>測定文 (races.meas)</h2>
 ${blocks.join('')}
@@ -1267,8 +1277,7 @@ function analyze(opts) {
     var show = opts.show === undefined ? 30 : opts.show;
     races.slice(0, show).forEach(function (r) {
       var g = (r.group_size || 1) > 1 ? "  x" + r.group_size : "";
-      log("   " + r.id + " " + ljust(r["class"], 10) + " " + r.a + " (" + r.stages_a + ") vs " + r.b + " (" + r.stages_b + ")" +
-        "  @ " + r.ccc_label + g);
+      log("   " + r.id + " " + ljust(r["class"], 10) + " " + stageSummary(r) + "  @ " + r.ccc_label + g);
     });
     fn.warnings.slice(0, 10).forEach(function (w) { log("  warning: " + w); });
     log("  wrote " + out + "/races.json, races.csv, races.meas, races_params.inc, report.html");
