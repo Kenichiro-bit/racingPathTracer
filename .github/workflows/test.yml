@@ -10,10 +10,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
@@ -25,6 +25,28 @@ jobs:
       - name: Smoke test (racepath analyze)
         run: |
           racepath --version
-          racepath analyze examples/sram_demo.cdl -o "$RUNNER_TEMP/rp" | tee "$RUNNER_TEMP/rp.txt"
-          grep -q "races: 6" "$RUNNER_TEMP/rp.txt"
-          test -s "$RUNNER_TEMP/rp/report.html"
+          OUT="$(mktemp -d)"
+          racepath analyze examples/sram_demo.cdl -o "$OUT/rp" | tee "$OUT/rp.txt"
+          grep -q "races: 6" "$OUT/rp.txt"
+          test -s "$OUT/rp/report.html"
+
+  # setup-python has no 3.9 build for the current ubuntu-latest image,
+  # so run 3.9 inside the official Python container instead.
+  pytest-py39:
+    runs-on: ubuntu-latest
+    container: python:3.9
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,yaml]"
+      - name: pytest
+        run: pytest -v
+      - name: Smoke test (racepath analyze)
+        run: |
+          racepath --version
+          OUT="$(mktemp -d)"
+          racepath analyze examples/sram_demo.cdl -o "$OUT/rp" | tee "$OUT/rp.txt"
+          grep -q "races: 6" "$OUT/rp.txt"
+          test -s "$OUT/rp/report.html"
