@@ -19,11 +19,11 @@ def test_jobs_flow_matches_cli(tmp_path):
     res = tmp_path / "res"
     (res / "decks" / "tt_0p80v_25c.raw").mkdir(parents=True)
     (res / "decks" / "tt_0p80v_25c.raw" / "tran1.measure").write_text(
-        "rp001_margin = 120m\nrp002_margin = 50p\nrp002_margin_end = 40p\n"
-        "rp003_margin = 30p\nrp004_margin = 25p\nrp005_skew = 5p\nrp006_skew = 100p\n")
+        "rp006_margin = 120m\nrp001_margin = 50p\nrp001_margin_end = 40p\n"
+        "rp003_margin = 30p\nrp004_margin = 25p\nrp002_skew = 5p\nrp005_skew = 100p\n")
     (res / "decks" / "ss.mt0").write_text(
-        "$DATA1\n.TITLE 'x'\nrp001_margin rp002_margin rp002_margin_end rp003_margin rp004_margin "
-        "rp005_skew rp006_skew temper alter#\n1.0e-02 -1.0e-11 3.0e-11 1.0e-11 failed -5.0e-12 9.0e-11 -40 1\n")
+        "$DATA1\n.TITLE 'x'\nrp006_margin rp001_margin rp001_margin_end rp003_margin rp004_margin "
+        "rp002_skew rp005_skew temper alter#\n1.0e-02 -1.0e-11 3.0e-11 1.0e-11 failed -5.0e-12 9.0e-11 -40 1\n")
     (res / "decks" / "wave.tran").write_text("binary")
     out = tmp_path / "out"
     subprocess.run([NODE, str(ROOT / "tests/js/jobs_flow.js"), str(EXAMPLES / "sram_demo.cdl"),
@@ -42,7 +42,7 @@ def test_jobs_flow_matches_cli(tmp_path):
         if n in ("races.json", "report.html"):   # meta.netlist: absolute path in the CLI, file name in the page
             a = a.replace(str(cli / "sram_demo.cdl"), "sram_demo.cdl")
         assert a == (out / n).read_bytes().decode(), n
-    assert flow["analyze"]["counts"] == {"sae_bl": 1, "wl_pre": 1, "hold": 2, "clock_pair": 1, "generic": 1}
+    assert flow["analyze"]["pins"] == [{"pin": "CLK", "count": 6}]
 
     # decks zip: valid, self-contained, run_all.sh executable
     zname = [z for z in out.iterdir() if z.name.endswith("_decks.zip")][0]
@@ -59,10 +59,10 @@ def test_jobs_flow_matches_cli(tmp_path):
     # collect: binary waveform skipped, folder structure kept for corner names
     assert {"skipped": "decks/wave.tran"} in flow["uploads"]
     hdr = flow["collect"]["header"]
-    assert hdr[5:7] == ["ss", "tt_0p80v_25c"]
-    rows = {(r[0], r[2]): dict(zip(hdr, r)) for r in flow["collect"]["rows"]}
-    assert rows[("rp002", "margin")]["verdict"] == "NG"
-    assert rows[("rp005", "skew")]["verdict"] == "順序反転"
+    assert hdr[4:6] == ["ss", "tt_0p80v_25c"]
+    rows = {(r[0], r[1]): dict(zip(hdr, r)) for r in flow["collect"]["rows"]}
+    assert rows[("rp001", "margin")]["verdict"] == "NG"
+    assert rows[("rp002", "skew")]["verdict"] == "順序反転"
     assert (out / "summary.csv").read_bytes().startswith(b"\xef\xbb\xbf")
 
     # job list / summary for re-display
@@ -72,7 +72,7 @@ def test_jobs_flow_matches_cli(tmp_path):
 
     st = flow["static"]
     assert st["sources"] == ["CLK"] and st["static_inputs"] == ["TM"] and st["options"]["static"] == "TM scan_en"
-    assert ("generic", "TMB", "TMBB") not in {(r["class"], r["a"], r["b"]) for r in st["races"]}
+    assert ("TMB", "TMBB") not in {(r["a"], r["b"]) for r in st["races"]}
     assert len(st["races"]) == 6
 
     e = flow["errors"]

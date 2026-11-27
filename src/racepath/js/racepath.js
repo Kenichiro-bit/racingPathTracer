@@ -11,7 +11,7 @@
 (function (root) {
 "use strict";
 
-var VERSION = "0.5.0";  // must equal racepath.__version__ (checked by tests)
+var VERSION = "0.6.0";  // must equal racepath.__version__ (checked by tests)
 
 var DEFAULT_CFG = {
   supplies: ["VDD*", "VSS*", "GND*", "VCC*", "VPWR*", "VGND*", "VPP*", "VBB*",
@@ -738,10 +738,11 @@ function groupRaces(races) {
     var cl = r.ccc_label.replace(/^CCC#\d+ /, "");
     var sig = JSON.stringify([r.class, norm(r.a), norm(r.b), norm(cl.split(":")[0]), r.stages_a, r.stages_b]);
     if (!groups.has(sig)) {
-      groups.set(sig, r); r.group_size = 1; r.group_members = []; order.push(r);
+      groups.set(sig, r); r.group_size = 1; r.group_members = []; r._pins = r.sources.slice(); order.push(r);
     } else {
       var g = groups.get(sig);
       g.group_size += 1;
+      r.sources.forEach(function (s) { if (g._pins.indexOf(s) < 0) g._pins.push(s); });
       if (g.group_members.length < 50) g.group_members.push({ ccc: r.ccc_label, a: r.a, b: r.b, probes: r.probes });
     }
   });
@@ -874,9 +875,9 @@ function findRaces(G, fn, sources, cfg, log) {
     });
   });
   var out = Array.from(races.values());
+  // tightest races first (smallest stage difference); classes are not used for ordering
   out.sort(function (x, y) {
-    return cmpTuple([CLASS_ORDER.indexOf(x["class"]), x.stage_diff, x.ccc, x.a, x.b],
-                    [CLASS_ORDER.indexOf(y["class"]), y.stage_diff, y.ccc, y.a, y.b]);
+    return cmpTuple([x.stage_diff, x.ccc, x.a, x.b], [y.stage_diff, y.ccc, y.a, y.b]);
   });
   if (out.length > cfg.max_races) {
     log("  note: " + out.length + " races found, keeping the first " + cfg.max_races + " (max_races)");
@@ -917,7 +918,7 @@ function measureLines(r, prefix, sup) {
   var rid = r.id, p = r.probes;
   var V = function (n) { return vref(n, prefix, sup); };
   var mid = "'th_mid*vdd_m'";
-  var L = ["* [" + rid + "] " + r["class"] + " : " + r.ccc_label];
+  var L = ["* [" + rid + "] " + (r.manual ? "手動の測定" : "入力端子 " + (r.pins || []).join(", ")) + " : " + r.ccc_label];
   if (r.manual) {
     L.push("*   " + Object.keys(p).map(function (k) { return k + "=" + pyStr(p[k]); }).join(", "));
   } else {
@@ -1013,10 +1014,10 @@ function explainRace(r, cfg) {
 // ------------------------------------------------------------------ reports
 
 function racesCsv(races) {
-  var out = "﻿" + csvRow(["id", "class", "class_ja", "explain", "ccc", "input_a", "input_b", "divergence",
+  var out = "\ufeff" + csvRow(["id", "pins", "ccc", "input_a", "input_b", "divergence",
     "stages_a", "stages_b", "stage_diff", "derived", "group_size", "probes", "path_a", "path_b"]);
   races.forEach(function (r) {
-    out += csvRow([r.id, r["class"], CLASS_INFO[r["class"]][0], r.explain || "", r.ccc_label, r.a, r.b,
+    out += csvRow([r.id, (r.pins || []).join(" "), r.ccc_label, r.a, r.b,
       r.divergence, r.stages_a, r.stages_b, r.stage_diff, r.derived, r.group_size || 1,
       Object.keys(r.probes).map(function (k) { return k + "=" + pyStr(r.probes[k]); }).join("; "),
       r.path_a.join(" -> "), r.path_b.join(" -> ")]);
@@ -1046,13 +1047,13 @@ function measHtml(lines, prefix) {
 var PROBE_JA = { sae: "SAE", wl: "WL", sa_t: "SA入力(T)", sa_c: "SA入力(C)", bl_t: "BL", bl_c: "BLB",
   pre: "プリチャージ", clk: "クロック", data_in: "データ入力", data_node: "データ(内部)", a: "入力A", b: "入力B" };
 
-function reportHtml(races, meta) {
+function pinsText(r) { return r.manual ? "手動の測定" : "入力端子 " + (r.pins || []).join(", "); }
+
+function reportHtml(races, meta, pins) {
   var prefix = meta.probe_prefix || "";
-  var byCls = {};
-  races.forEach(function (r) { byCls[r["class"]] = (byCls[r["class"]] || 0) + 1; });
-  var cards = [], blocks = [];
+  var cards = {}, blocks = [];
   races.forEach(function (r) {
-    var rid = r.id, info = CLASS_INFO[r["class"]], cja = info[0], metric = info[1], flags = [];
+    var rid = r.id, flags = [];
     if (r.derived) flags.push("派生");
     if (r.manual) flags.push("手動");
     if ((r.group_size || 1) > 1) flags.push("同型×" + r.group_size);
@@ -1067,21 +1068,44 @@ function reportHtml(races, meta) {
       '<div class="pl"><span class="lab">A</span><span class="chain">' + chain(r.path_a, rid) + '</span><span class="st">' + r.stages_a + "段</span></div>\n" +
       '<div class="pl"><span class="lab">B</span><span class="chain">' + chain(r.path_b, rid) + '</span><span class="st">' + r.stages_b + "段</span></div>\n" +
       '<div class="sub">分岐点 ' + netlink(r.divergence, rid) + " から数えた段数(差" + r.stage_diff + "段) ・ 合流 " + esc(r.ccc_label) + "</div></div>";
-    cards.push('<section class="card c-' + r["class"] + '" id="r-' + rid + '">\n' +
-      '<header><a class="rid" href="#m-' + rid + '">' + rid + '</a><span class="tag t-' + r["class"] + '">' + cja + "</span>" + flagHtml + "</header>\n" +
-      '<p class="ex">' + esc(r.explain || "") + "</p>\n" +
+    cards[rid] = '<section class="card" id="r-' + rid + '">\n' +
+      '<header><a class="rid" href="#m-' + rid + '">' + rid + "</a>" + flagHtml + "</header>\n" +
+      '<div class="sub">' + esc(pinsText(r)) + "</div>\n" +
       paths + "\n" +
       '<div class="probes"><span class="lab2">プローブ</span>' + probes + "</div>\n" +
-      '<div class="sub">主指標: ' + esc(metric) + ' ・ <a href="#m-' + rid + '">測定文を見る ↓</a></div>\n' +
-      "</section>");
+      '<div class="sub"><a href="#m-' + rid + '">測定文を見る ↓</a></div>\n' +
+      "</section>";
     blocks.push('<div class="mblk" id="m-' + rid + '" data-rid="' + rid + '">\n' +
-      '<div class="mh"><b>' + rid + '</b> <span class="tag t-' + r["class"] + '">' + cja + '</span> <a href="#r-' + rid + '">↑ カードへ戻る</a></div>\n' +
+      '<div class="mh"><b>' + rid + '</b> <span class="pins">' + esc(pinsText(r)) + '</span> <a href="#r-' + rid + '">↑ カードへ戻る</a></div>\n' +
       '<div class="note"></div>\n' +
       "<pre>" + measHtml(r.meas || [], prefix) + "</pre></div>");
   });
-  var summary = CLASS_ORDER.filter(function (c) { return byCls[c]; }).map(function (c) {
-    return '<span class="tag t-' + c + '">' + CLASS_INFO[c][0] + " " + byCls[c] + "</span>";
-  }).join(" ");
+  // one section per input pin; a race shared by several pins is drawn under its first pin
+  // and linked from the others
+  var byId = {};
+  races.forEach(function (r) { byId[r.id] = r; });
+  var nav = [], sections = [];
+  pins.forEach(function (pe, i) {
+    var p = pe.pin, ids = pe.races;
+    nav.push('<a class="tag t-pin" href="#p-' + i + '">' + esc(p) + " " + ids.length + "</a>");
+    var own = ids.filter(function (x) { return byId[x].pins[0] === p; }).map(function (x) { return cards[x]; });
+    var others = ids.filter(function (x) { return byId[x].pins[0] !== p; });
+    var sec = '<h2 id="p-' + i + '">入力端子 ' + esc(p) + ' <span class="cnt">競合 ' + ids.length + "件</span></h2>\n" + own.join("");
+    if (others.length) {
+      sec += '<p class="also">ほかの入力端子の下に載せた競合: ' + others.map(function (x) {
+        return '<a href="#r-' + x + '">' + x + "</a>(" + esc(byId[x].pins[0]) + ")";
+      }).join("、") + "</p>";
+    }
+    if (!ids.length) sec += '<p class="meta">この端子から始まる競合はありません。</p>';
+    sections.push(sec);
+  });
+  var manual = races.filter(function (r) { return r.manual; });
+  if (manual.length) {
+    nav.push('<a class="tag t-pin" href="#p-manual">手動の測定 ' + manual.length + "</a>");
+    sections.push('<h2 id="p-manual">手動の測定 <span class="cnt">' + manual.length + "件</span></h2>\n" +
+      manual.map(function (r) { return cards[r.id]; }).join(""));
+  }
+  var summary = nav.join(" ");
   var warn = "";
   if (meta.warnings && meta.warnings.length) {
     warn = "<details><summary>警告 " + meta.warnings.length + "件</summary><ul>" +
@@ -1094,7 +1118,7 @@ function reportHtml(races, meta) {
 <title>racepath report - ${esc(meta.top)}</title>
 <style>
 :root{--bg:#f7f6f2;--card:#fff;--fg:#1d1d1b;--mute:#6b6a64;--line:#e4e1d8;--hit:#ffe58a;
---sae:#b4532a;--wl:#2a6fb4;--hold:#7a3fb0;--clk:#2f8a5b;--gen:#76746c}
+--wl:#2a6fb4;--gen:#76746c}
 *{box-sizing:border-box}
 body{font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;background:var(--bg);color:var(--fg);
 margin:0;padding:20px;line-height:1.55;max-width:1100px;margin:0 auto}
@@ -1103,13 +1127,11 @@ h1{font-size:20px;margin:0 0 4px} h2{font-size:16px;margin:28px 0 10px}
 .mono,.chain,.pb,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
 .card{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--gen);border-radius:10px;
 padding:14px 16px;margin:12px 0}
-.c-sae_bl{border-left-color:var(--sae)} .c-wl_pre{border-left-color:var(--wl)} .c-hold{border-left-color:var(--hold)}
-.c-clock_pair{border-left-color:var(--clk)}
 header{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px}
 .rid{font-family:ui-monospace,monospace;font-weight:700;color:var(--fg);text-decoration:none;margin-right:2px}
 .tag{display:inline-block;font-size:12px;padding:2px 9px;border-radius:10px;color:#fff;white-space:nowrap}
-.t-sae_bl{background:var(--sae)} .t-wl_pre{background:var(--wl)} .t-hold{background:var(--hold)}
-.t-clock_pair{background:var(--clk)} .t-generic{background:var(--gen)}
+.t-pin{background:var(--wl);text-decoration:none;margin:2px 0} .cnt{font-size:13px;color:var(--mute);font-weight:400}
+.pins{font-size:12px;color:var(--mute)} .also{font-size:13px;color:var(--mute)}
 .flag{font-size:11px;border:1px solid var(--line);border-radius:8px;padding:1px 7px;color:var(--mute)}
 .ex{margin:4px 0 10px;font-size:14.5px}
 .paths{background:#faf9f5;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}
@@ -1142,7 +1164,7 @@ details{margin:10px 0;font-size:13px}
 起点 ${esc(meta.sources.join(', '))}${staticHtml} ・ 競合 ${races.length}件</div>
 <div>${summary}</div>${warn}
 <p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。段数は、分岐点(2本の経路が分かれる最後の共通ネット)から、合流するブロックの入力までに通る論理段の数です。インバータや NAND など、チャネルでつながったトランジスタのまとまり(CCC)1つを1段と数えます。0段はその入力が分岐点そのものであることを、同相/逆相は起点(CLK など)から見た信号の向きを表します。</p>
-${cards.join('')}
+${sections.join('')}
 <h2>測定文 (races.meas)</h2>
 ${blocks.join('')}
 <script>
@@ -1153,9 +1175,21 @@ ${blocks.join('')}
     document.querySelectorAll('.note').forEach(function(x){x.className='note';x.innerHTML='';});
   }
   function esc(t){return t.replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function jump(id){
+    var t = document.getElementById(id); if(!t) return false;
+    t.scrollIntoView({behavior:'smooth', block:'start'});
+    try { if(history.replaceState) history.replaceState(null, '', '#'+id); } catch(err) {}
+    return true;
+  }
   document.addEventListener('click', function(e){
     var a = e.target.closest ? e.target.closest('a.net') : null;
-    if(!a) return;
+    if(!a){
+      // in-page links (card <-> measures, pin sections) scrolled by script, so they also work
+      // when this report is shown from a blob: URL inside the single-file racepath.html
+      var h = e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if(h && jump(h.getAttribute('href').slice(1))) e.preventDefault();
+      return;
+    }
     e.preventDefault();
     var rid = a.getAttribute('data-rid'), net = a.getAttribute('data-net');
     var blk = document.getElementById('m-'+rid); if(!blk) return;
@@ -1182,7 +1216,7 @@ ${blocks.join('')}
     }
     blk.scrollIntoView({behavior:'smooth', block:'start'});
     blk.classList.add('flash'); setTimeout(function(){blk.classList.remove('flash');}, 1400);
-    if(history.replaceState) history.replaceState(null, '', '#m-'+rid);
+    try { if(history.replaceState) history.replaceState(null, '', '#m-'+rid); } catch(err) {}
   });
 })();
 </script>
@@ -1243,6 +1277,18 @@ function analyze(opts) {
     var netsAll = new Set(G.fanout.keys());
     G.ccc_of.forEach(function (_v, n) { netsAll.add(n); });
     addExtraChecks(races, cfg, netsAll, log);
+    // input pins (launch nets as resolved in the netlist), in the order given
+    var pinOrder = [];
+    srcs.forEach(function (s) { var n = resolveNet(s, netsAll); if (n !== null && pinOrder.indexOf(n) < 0) pinOrder.push(n); });
+    var rank = new Map();
+    pinOrder.forEach(function (p, i) { rank.set(p, i); });
+    races.forEach(function (r) {
+      var rp = r._pins !== undefined ? r._pins : r.sources;
+      delete r._pins;
+      r.pins = rp.slice().sort(function (x, y) {
+        return cmpTuple([rank.has(x) ? rank.get(x) : rank.size, x], [rank.has(y) ? rank.get(y) : rank.size, y]);
+      });
+    });
     var prefix = cfg.probe_prefix;
     races.forEach(function (r, i) {
       r.id = "rp" + String(i + 1).padStart(3, "0");
@@ -1266,22 +1312,33 @@ function analyze(opts) {
       static_inputs: staticPorts,
       probe_prefix: prefix, cfg: cfg, warnings: fn.warnings
     };
-    files["races.json"] = pyJson({ meta: meta, races: races }, 1);
+    var pins = pinOrder.map(function (p) {
+      return { pin: p, races: races.filter(function (r) { return r.pins.indexOf(p) >= 0; }).map(function (r) { return r.id; }) };
+    });
+    files["races.json"] = pyJson({ meta: meta, pins: pins, races: races }, 1);
     files["races.csv"] = racesCsv(races);
-    files["report.html"] = reportHtml(races, meta);
+    files["report.html"] = reportHtml(races, meta, pins);
 
-    var by = {};
-    races.forEach(function (r) { by[r["class"]] = (by[r["class"]] || 0) + 1; });
-    log("  races: " + races.length + "  (" + CLASS_ORDER.filter(function (c) { return by[c]; })
-      .map(function (c) { return c + "=" + by[c]; }).join(", ") + ")");
-    var show = opts.show === undefined ? 30 : opts.show;
-    races.slice(0, show).forEach(function (r) {
-      var g = (r.group_size || 1) > 1 ? "  x" + r.group_size : "";
-      log("   " + r.id + " " + ljust(r["class"], 10) + " " + stageSummary(r) + "  @ " + r.ccc_label + g);
+    log("  races: " + races.length + "  (入力端子 " + pinOrder.length + "本)");
+    var byId = {};
+    races.forEach(function (r) { byId[r.id] = r; });
+    var groups = pins.map(function (pe) {
+      return ["入力端子 " + pe.pin + "  競合 " + pe.races.length + "件", pe.races.map(function (x) { return byId[x]; })];
+    });
+    var manual = races.filter(function (r) { return r.manual; });
+    if (manual.length) groups.push(["手動の測定  " + manual.length + "件", manual]);
+    var show = opts.show === undefined ? 30 : opts.show, shown = 0;
+    groups.forEach(function (gp) {
+      log("  ■ " + gp[0]);
+      for (var i = 0; i < gp[1].length && shown < show; i++) {
+        var r = gp[1][i], g = (r.group_size || 1) > 1 ? "  x" + r.group_size : "";
+        shown++;
+        log("   " + r.id + " " + stageSummary(r) + "  @ " + r.ccc_label + g);
+      }
     });
     fn.warnings.slice(0, 10).forEach(function (w) { log("  warning: " + w); });
     log("  wrote " + out + "/races.json, races.csv, races.meas, races_params.inc, report.html");
-    return { files: files, log: logLines.map(function (l) { return l + "\n"; }).join(""), races: races, meta: meta };
+    return { files: files, log: logLines.map(function (l) { return l + "\n"; }).join(""), races: races, meta: meta, pins: pins };
   } catch (e) {
     var err = e instanceof RacepathError ? e : new RacepathError(String(e && e.stack || e));
     err.log = logLines.map(function (l) { return l + "\n"; }).join("") + err.message + "\n";
@@ -1491,19 +1548,19 @@ function collect(opts) {
       }
       var wc = "";
       if (worst !== null) { for (var i = 0; i < vals.length; i++) if (vals[i] === worst) { wc = cnames[i]; break; } }
-      rows.push([r.id, r["class"], mt, r.a, r.b].concat(vals, [worst, wc, verdict]));
+      rows.push([r.id, mt, r.a, r.b].concat(vals, [worst, wc, verdict]));
     });
   });
-  var header = ["id", "class", "metric", "input_a", "input_b"].concat(cnames, ["worst", "worst_corner", "verdict"]);
+  var header = ["id", "metric", "input_a", "input_b"].concat(cnames, ["worst", "worst_corner", "verdict"]);
   var cell = function (v) { return v === null ? "" : (typeof v === "number" ? pyFloat(v) : v); };
-  var csv = "﻿" + csvRow(header) + rows.map(function (row) { return csvRow(row.map(cell)); }).join("");
+  var csv = "\ufeff" + csvRow(header) + rows.map(function (row) { return csvRow(row.map(cell)); }).join("");
   var out = opts.out || "racepath_summary.csv";
   var log = cnames.length + " corners, " + rows.length + " metrics -> " + out + "\n";
   rows.forEach(function (row) {
     var v = row[row.length - 1];
     if (v && v !== "OK") {
       var w = row[row.length - 3];
-      log += "  " + row[0] + " " + ljust(row[1], 10) + " " + ljust(row[2], 10) + " worst=" +
+      log += "  " + row[0] + " " + ljust(row[1], 10) + " worst=" +
         (w === null ? "None" : pyFloat(w)) + " @ " + row[row.length - 2] + "  " + v + "\n";
     }
   });

@@ -84,7 +84,7 @@ def test_sae_bl_details(demo):
     assert (p["sae"], p["wl"]) == ("SAE", "WL0")
     assert {p["sa_t"], p["sa_c"]} == {"SAT", "SAC"}
     assert {p["bl_t"], p["bl_c"]} == {"BL", "BLB"}
-    assert any("rp001_dvbl" in m for m in r["meas"])
+    assert any("rp006_dvbl" in m for m in r["meas"])
 
 
 def test_hold_data_node(demo):
@@ -108,7 +108,7 @@ def test_outputs_written(demo):
     raw = (out / "races.csv").read_bytes()
     assert raw.startswith(b"\xef\xbb\xbf")
     html = (out / "report.html").read_text(encoding="utf-8")
-    assert "viewport" in html and "rp001" in html
+    assert "viewport" in html and "rp006" in html
     for r in data["races"]:
         assert r["explain"]
 
@@ -168,24 +168,24 @@ def test_collect(demo, tmp_path):
     # Spectre-style key = value results, corner name taken from parent dir
     (res / "tt_0p80v_25c.raw").mkdir(parents=True)
     (res / "tt_0p80v_25c.raw" / "tran1.measure").write_text(
-        "rp001_margin = 120m\nrp002_margin = 50p\nrp002_margin_end = 40p\n"
-        "rp003_margin = 30p\nrp004_margin = 25p\nrp005_skew = 5p\nrp006_skew = 100p\n")
+        "rp006_margin = 120m\nrp001_margin = 50p\nrp001_margin_end = 40p\n"
+        "rp003_margin = 30p\nrp004_margin = 25p\nrp002_skew = 5p\nrp005_skew = 100p\n")
     # HSPICE .mt0 tabular results, with a failed measurement
-    names = "rp001_margin rp002_margin rp002_margin_end rp003_margin rp004_margin rp005_skew rp006_skew temper alter#"
+    names = "rp006_margin rp001_margin rp001_margin_end rp003_margin rp004_margin rp002_skew rp005_skew temper alter#"
     (res / "ss_0p72v_m40c.mt0").write_text(
         "$DATA1 SOURCE='HSPICE'\n.TITLE 'deck'\n" + names + "\n"
         "1.000e-02 -1.0e-11 3.0e-11 1.0e-11 failed -5.0e-12 9.0e-11 -40.0 1\n")
     summary = tmp_path / "summary.csv"
     run("collect", out / "races.json", res, "-o", summary)
     rows = {(r["id"], r["metric"]): r for r in _read_csv(summary)}
-    assert rows[("rp001", "margin")]["verdict"] == "要注意"       # 10mV < warn-v 20mV
-    assert rows[("rp001", "margin")]["worst_corner"] == "ss_0p72v_m40c"
-    assert rows[("rp002", "margin")]["verdict"] == "NG"
-    assert rows[("rp002", "margin_end")]["verdict"] == "OK"
+    assert rows[("rp006", "margin")]["verdict"] == "要注意"       # 10mV < warn-v 20mV
+    assert rows[("rp006", "margin")]["worst_corner"] == "ss_0p72v_m40c"
+    assert rows[("rp001", "margin")]["verdict"] == "NG"
+    assert rows[("rp001", "margin_end")]["verdict"] == "OK"
     assert rows[("rp003", "margin")]["verdict"] == "要注意"       # 10ps < 20ps
     assert "測定失敗あり" in rows[("rp004", "margin")]["verdict"]
-    assert rows[("rp005", "skew")]["verdict"] == "順序反転"
-    assert rows[("rp006", "skew")]["verdict"] == ""
+    assert rows[("rp002", "skew")]["verdict"] == "順序反転"
+    assert rows[("rp005", "skew")]["verdict"] == ""
     assert summary.read_bytes().startswith(b"\xef\xbb\xbf")
 
 
@@ -194,7 +194,7 @@ def test_collect(demo, tmp_path):
 def test_stage_counts_are_described_from_the_divergence_point(demo, tmp_path):
     out, data = demo
     p = run("analyze", EXAMPLES / "sram_demo.cdl", "-o", tmp_path / "o")
-    assert "rp001 sae_bl     分岐点 CLKBUF から SAE 6段 / WL0 2段(差4段)  @ CCC#0" in p.stdout
+    assert "rp006 分岐点 CLKBUF から SAE 6段 / WL0 2段(差4段)  @ CCC#0" in p.stdout
     assert "分岐点 CKI から CKBI 1段 / CKI 0段(分岐点そのもの)(差1段)" in p.stdout
     meas = (out / "races.meas").read_text(encoding="utf-8")
     assert "*   分岐点 CLKBUF から SAE まで6段(CLK と同相)、WL0 まで2段(CLK と同相)、差4段" in meas

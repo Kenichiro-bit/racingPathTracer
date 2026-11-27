@@ -89,12 +89,12 @@ def test_upload_analyze_six_races(server):
     base, _ = server
     job, res = upload_and_analyze(base, EXAMPLES / "sram_demo.cdl")
     assert res["analyzed"] and res["top"] == "SRAM_DEMO" and res["n_mos"] == 60
-    assert {(r["class"], r["a"], r["b"]) for r in res["races"]} == EXPECTED
-    assert res["counts"] == {"sae_bl": 1, "wl_pre": 1, "hold": 2, "clock_pair": 1, "generic": 1}
+    assert {(r["a"], r["b"]) for r in res["races"]} == {(a, b) for _, a, b in EXPECTED}
+    assert res["pins"] == [{"pin": "CLK", "count": 6}] and res["manual"] == 0
     assert "races: 6" in res["log"]
     assert set(res["files"]) == set(web.OUTPUT_FILES)
     st, body, hdr = call(base, "GET", f"/files/{job}/out/report.html", token=None)
-    assert st == 200 and b"rp001" in body and hdr["Content-Type"].startswith("text/html")
+    assert st == 200 and b"rp006" in body and hdr["Content-Type"].startswith("text/html")
     st, body, hdr = call(base, "GET", f"/files/{job}/out/races.meas?dl=1", token=None)
     assert st == 200 and "attachment" in hdr["Content-Disposition"] and b".measure" in body
     # job list and reopen
@@ -112,7 +112,7 @@ def test_analyze_by_path_spectre_with_options(server):
     assert resp[0] == 200, resp[1]
     res = j(resp)
     assert res["format"] == "spectre"
-    assert {(r["class"], r["a"], r["b"]) for r in res["races"]} == EXPECTED
+    assert {(r["a"], r["b"]) for r in res["races"]} == {(a, b) for _, a, b in EXPECTED}
     assert res["options"]["top"] == "SRAM_DEMO" and res["options"]["no_group"] is True
 
 
@@ -120,10 +120,10 @@ def test_analyze_with_static_inputs(server):
     base, _ = server
     case = ROOT / "tests" / "cases" / "testmode.cdl"
     res = j(call(base, "POST", "/api/analyze", {"path": str(case)}))
-    assert ("generic", "TMB", "TMBB") in {(r["class"], r["a"], r["b"]) for r in res["races"]}
+    assert ("TMB", "TMBB") in {(r["a"], r["b"]) for r in res["races"]}
     res = j(call(base, "POST", "/api/analyze", {"path": str(case), "static": "TM, scan_en"}))
     assert res["sources"] == ["CLK"] and res["static_inputs"] == ["TM"]
-    assert {(r["class"], r["a"], r["b"]) for r in res["races"]} == EXPECTED
+    assert {(r["a"], r["b"]) for r in res["races"]} == {(a, b) for _, a, b in EXPECTED}
     assert res["options"]["static"] == "TM scan_en"
     assert "static inputs: TM" in res["log"]
 
@@ -177,18 +177,18 @@ def test_collect_upload_with_folder_paths(server):
     job, _ = upload_and_analyze(base, EXAMPLES / "sram_demo.cdl")
     # a path that tries to escape is flattened into the job's results folder
     st, body, _ = call(base, "POST", f"/api/upload-result?job={job}&name=" + urllib.parse.quote("../../escape.measure"),
-                       b"rp001_margin = 1\n", raw=True)
+                       b"rp006_margin = 1\n", raw=True)
     assert st == 200 and json.loads(body)["saved"] == "escape.measure"
     assert (Path(httpd.app.workdir) / job / "results" / "escape.measure").is_file()
     assert call(base, "POST", "/api/clear-results", {"job": job})[0] == 200
     files = {
         "decks/tt_0p80v_25c.raw/tran1.measure":
-            "rp001_margin = 120m\nrp002_margin = 50p\nrp002_margin_end = 40p\n"
-            "rp003_margin = 30p\nrp004_margin = 25p\nrp005_skew = 5p\nrp006_skew = 100p\n",
+            "rp006_margin = 120m\nrp001_margin = 50p\nrp001_margin_end = 40p\n"
+            "rp003_margin = 30p\nrp004_margin = 25p\nrp002_skew = 5p\nrp005_skew = 100p\n",
         "decks/ss_0p72v_m40c.mt0":
             "$DATA1 SOURCE='HSPICE'\n.TITLE 'deck'\n"
-            "rp001_margin rp002_margin rp002_margin_end rp003_margin rp004_margin "
-            "rp005_skew rp006_skew temper alter#\n"
+            "rp006_margin rp001_margin rp001_margin_end rp003_margin rp004_margin "
+            "rp002_skew rp005_skew temper alter#\n"
             "1.000e-02 -1.0e-11 3.0e-11 1.0e-11 failed -5.0e-12 9.0e-11 -40.0 1\n",
         "decks/tt_0p80v_25c.raw/tran1.tran.tran": "binary waveform, must be skipped",
     }
@@ -203,14 +203,14 @@ def test_collect_upload_with_folder_paths(server):
     res = j(resp)
     hdr = res["header"]
     assert "tt_0p80v_25c" in hdr and "ss_0p72v_m40c" in hdr
-    rows = {(r[0], r[2]): dict(zip(hdr, r)) for r in res["rows"]}
-    assert rows[("rp002", "margin")]["verdict"] == "NG"
-    assert rows[("rp005", "skew")]["verdict"] == "順序反転"
+    rows = {(r[0], r[1]): dict(zip(hdr, r)) for r in res["rows"]}
+    assert rows[("rp001", "margin")]["verdict"] == "NG"
+    assert rows[("rp002", "skew")]["verdict"] == "順序反転"
     assert call(base, "GET", f"/files/{job}/summary.csv?dl=1", token=None)[0] == 200
     # stricter time threshold turns 25ps/30ps hold margins into warnings
     res = j(call(base, "POST", "/api/collect", {"job": job, "warn_ps": "1000"}))
-    rows = {(r[0], r[2]): dict(zip(res["header"], r)) for r in res["rows"]}
-    assert rows[("rp002", "margin_end")]["verdict"] == "要注意"
+    rows = {(r[0], r[1]): dict(zip(res["header"], r)) for r in res["rows"]}
+    assert rows[("rp001", "margin_end")]["verdict"] == "要注意"
 
 
 def test_collect_by_path(server, tmp_path):
@@ -218,9 +218,9 @@ def test_collect_by_path(server, tmp_path):
     job, _ = upload_and_analyze(base, EXAMPLES / "sram_demo.cdl")
     d = tmp_path / "sim"
     d.mkdir()
-    (d / "tt.measure").write_text("rp001_margin = 0.2\n")
+    (d / "tt.measure").write_text("rp006_margin = 0.2\n")
     res = j(call(base, "POST", "/api/collect", {"job": job, "path": str(d)}))
-    assert res["header"][5] == "tt"
+    assert res["header"][4] == "tt"
     assert call(base, "POST", "/api/collect", {"job": job, "path": str(d / "nope")})[0] == 400
 
 

@@ -92,6 +92,9 @@ CASES = ROOT / "tests" / "cases"
     ("testmode.cdl", ["--static", "t*", "--static", "nothing"]),
     ("testmode.cdl", ["-s", "CLK", "-s", "TM", "--static", "TM"]),
     ("testmode.cdl", ["--static", "SCAN_EN"]),
+    ("twobits.cdl", []),
+    ("twobits.cdl", ["--no-group", "--show", "1"]),
+    ("twobits.cdl", ["-s", "D<1>", "-s", "D<0>"]),
 ])
 def test_cases(tmp_path, case, extra):
     """Every reproduction case in tests/cases/ must also give identical results in both engines."""
