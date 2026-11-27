@@ -1,0 +1,26 @@
+* racepath test case: per-pin output of grouped races.
+* Each data pin D<i> feeds an inverter pair that reconverges on a NAND (DI vs DIB).
+* The two bits are structurally identical, so their races are grouped into one;
+* the group must still be listed under BOTH input pins D<0> and D<1>.
+.GLOBAL VDD VSS
+.SUBCKT INV A Y VDD VSS
+MP0 Y A VDD VDD pch W=0.4u L=0.04u
+MN0 Y A VSS VSS nch W=0.2u L=0.04u
+.ENDS
+.SUBCKT NAND2 A B Y VDD VSS
+MP0 Y A VDD VDD pch W=0.4u L=0.04u
+MP1 Y B VDD VDD pch W=0.4u L=0.04u
+MN0 Y A X VSS nch W=0.4u L=0.04u
+MN1 X B VSS VSS nch W=0.4u L=0.04u
+.ENDS
+.SUBCKT BIT D Q VDD VSS
+XI0 D DB VDD VSS INV
+XI1 DB DBB VDD VSS INV
+XN0 DB DBB Q VDD VSS NAND2
+.ENDS
+.SUBCKT TWOBITS D<0> D<1> EN Q<0> Q<1> VDD VSS
+*.PININFO D<0>:I D<1>:I EN:I Q<0>:O Q<1>:O VDD:B VSS:B
+XB<0> D<0> Q<0> VDD VSS BIT
+XB<1> D<1> Q<1> VDD VSS BIT
+XE EN ENB VDD VSS INV
+.ENDS

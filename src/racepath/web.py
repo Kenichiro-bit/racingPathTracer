@@ -267,11 +267,8 @@ pre{background:var(--code);border-radius:6px;padding:10px;overflow:auto;font-siz
 .chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .chip{border-radius:999px;padding:2px 10px;font-size:13px;border:1px solid var(--line)}
 .chip b{font-weight:700}
-.k-sae_bl{color:var(--c-sae);border-color:var(--c-sae)}
-.k-wl_pre{color:var(--c-wl);border-color:var(--c-wl)}
-.k-hold{color:var(--c-hold);border-color:var(--c-hold)}
-.k-clock_pair{color:var(--c-clk);border-color:var(--c-clk)}
-.k-generic{color:var(--c-gen);border-color:var(--c-gen)}
+a.chip{color:var(--accent);border-color:var(--accent);text-decoration:none;cursor:pointer}
+a.chip.zero{color:var(--muted);border-color:var(--line)}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:6px 0}
 .fact{background:var(--bg);border-radius:6px;padding:8px}
 .fact .l{font-size:12px;color:var(--muted)}
@@ -409,9 +406,6 @@ td.v-OK{color:var(--ok)}
 (function(){
 "use strict";
 var TOKEN = "__TOKEN__";
-var CLASS_JA = {sae_bl:"SAE vs BL振幅", wl_pre:"WL vs プリチャージ", hold:"ラッチ ホールド",
-                clock_pair:"クロック対", generic:"汎用"};
-var ORDER = ["sae_bl","wl_pre","hold","clock_pair","generic"];
 var state = {job:null, mode:"file", cmode:"up"};
 function $(id){ return document.getElementById(id); }
 function el(tag, attrs, text){
@@ -526,8 +520,14 @@ function show(res){
     var d = el("div",{"class":"fact"}); d.appendChild(el("div",{"class":"l"},f[0])); d.appendChild(el("div",{"class":"v"},f[1]));
     facts.appendChild(d);
   });
-  ORDER.forEach(function(c){ var n=(res.counts||{})[c]; if(!n) return;
-    var s = el("span",{"class":"chip k-"+c}, CLASS_JA[c]+" "); s.appendChild(el("b",null,n)); chips.appendChild(s); });
+  // one chip per input pin (race count); tapping it scrolls the report below to that pin
+  var jump = function(anchor){ return function(e){ e.preventDefault();
+    var base = (LOCAL ? state.reportUrl : fileUrl("out/report.html")) || ""; if(base) $("r-frame").src = base + "#" + anchor; }; };
+  (res.pins||[]).forEach(function(p, i){
+    var a = el("a",{"class":"chip"+(p.count ? "" : " zero"), href:"#"}, p.pin+" ");
+    a.appendChild(el("b",null,p.count)); a.addEventListener("click", jump("p-"+i)); chips.appendChild(a); });
+  if(res.manual){ var a = el("a",{"class":"chip", href:"#"}, "手動の測定 "); a.appendChild(el("b",null,res.manual));
+    a.addEventListener("click", jump("p-manual")); chips.appendChild(a); }
   (res.warnings||[]).slice(0,20).forEach(function(w){ warns.appendChild(el("li",null,w)); });
   files.appendChild(fileLink("out/report.html","レポートを新しいタブで開く",false,true));
   (res.files||[]).forEach(function(f){ files.appendChild(fileLink("out/"+f, f+" ⇩", true)); });

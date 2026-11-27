@@ -164,19 +164,18 @@ class App:
             with open(rj, encoding="utf-8") as f:
                 data = json.load(f)
             m = data["meta"]
-            counts = {}
-            for r in data["races"]:
-                counts[r["class"]] = counts.get(r["class"], 0) + 1
             res.update({
                 "analyzed": True,
                 "top": m.get("top"), "format": m.get("format"), "n_mos": m.get("n_mos"),
                 "n_ccc": m.get("n_ccc"), "sources": m.get("sources", []),
                 "static_inputs": m.get("static_inputs", []),
-                "warnings": m.get("warnings", []), "counts": counts,
-                "races": [{"id": r["id"], "class": r["class"], "a": r["a"], "b": r["b"],
+                "warnings": m.get("warnings", []),
+                "pins": [{"pin": p["pin"], "count": len(p["races"])} for p in data.get("pins", [])],
+                "manual": sum(1 for r in data["races"] if r.get("manual")),
+                "races": [{"id": r["id"], "pins": r.get("pins", []), "a": r["a"], "b": r["b"],
                            "stages_a": r.get("stages_a"), "stages_b": r.get("stages_b"),
                            "divergence": r.get("divergence"), "group_size": r.get("group_size", 1),
-                           "derived": r.get("derived", False), "explain": r.get("explain", "")}
+                           "derived": r.get("derived", False)}
                           for r in data["races"]],
                 "files": [f for f in OUTPUT_FILES if os.path.isfile(os.path.join(d, "out", f))],
             })

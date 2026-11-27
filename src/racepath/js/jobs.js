@@ -96,14 +96,15 @@ Jobs.prototype.summary = function (name) {
   var res = { job: name, netlist_name: j.netlistName, netlist_path: j.netlistName, options: j.options,
               log: j.log || "", analyzed: false };
   if (j.out) {
-    var m = j.out.meta, counts = {};
-    j.out.races.forEach(function (r) { counts[r["class"]] = (counts[r["class"]] || 0) + 1; });
+    var m = j.out.meta;
     Object.assign(res, {
       analyzed: true, top: m.top, format: m.format, n_mos: m.n_mos, n_ccc: m.n_ccc,
-      sources: m.sources, static_inputs: m.static_inputs || [], warnings: m.warnings, counts: counts,
+      sources: m.sources, static_inputs: m.static_inputs || [], warnings: m.warnings,
+      pins: j.out.pins.map(function (p) { return { pin: p.pin, count: p.races.length }; }),
+      manual: j.out.races.filter(function (r) { return r.manual; }).length,
       races: j.out.races.map(function (r) {
-        return { id: r.id, "class": r["class"], a: r.a, b: r.b, stages_a: r.stages_a, stages_b: r.stages_b,
-                 divergence: r.divergence, group_size: r.group_size || 1, derived: !!r.derived, explain: r.explain || "" };
+        return { id: r.id, pins: r.pins || [], a: r.a, b: r.b, stages_a: r.stages_a, stages_b: r.stages_b,
+                 divergence: r.divergence, group_size: r.group_size || 1, derived: !!r.derived };
       }),
       files: OUTPUT_FILES.slice()
     });

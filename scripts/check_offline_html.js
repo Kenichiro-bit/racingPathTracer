@@ -19,11 +19,11 @@ function resultsDir() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'rp-sim-'));
   fs.mkdirSync(path.join(d, 'tt_0p80v_25c.raw'));
   fs.writeFileSync(path.join(d, 'tt_0p80v_25c.raw', 'tran1.measure'),
-    'rp001_margin = 120m\nrp002_margin = 50p\nrp002_margin_end = 40p\n' +
-    'rp003_margin = 30p\nrp004_margin = 25p\nrp005_skew = 5p\nrp006_skew = 100p\n');
+    'rp006_margin = 120m\nrp001_margin = 50p\nrp001_margin_end = 40p\n' +
+    'rp003_margin = 30p\nrp004_margin = 25p\nrp002_skew = 5p\nrp005_skew = 100p\n');
   fs.writeFileSync(path.join(d, 'ss_0p72v_m40c.mt0'),
     "$DATA1 SOURCE='HSPICE'\n.TITLE 'x'\n" +
-    'rp001_margin rp002_margin rp002_margin_end rp003_margin rp004_margin rp005_skew rp006_skew temper alter#\n' +
+    'rp006_margin rp001_margin rp001_margin_end rp003_margin rp004_margin rp002_skew rp005_skew temper alter#\n' +
     '1.0e-02 -1.0e-11 3.0e-11 1.0e-11 failed -5.0e-12 9.0e-11 -40.0 1\n');
   return d;
 }
@@ -53,27 +53,42 @@ async function flow(browser, opts, tag) {
   const status = await p.textContent('#st-analyze');
   assert(status.includes('競合 6 件'), 'analyze status: ' + status + ' / ' + (await p.textContent('#r-log')));
   const chips = await p.$$eval('#r-chips .chip', e => e.map(x => x.innerText));
-  assert(chips.length === 5, 'class chips ' + chips);
+  assert(chips.length === 1 && chips[0].startsWith('CLK') && chips[0].includes('6'), 'input pin chips ' + chips);
 
   // The report is loaded into the iframe from a blob URL. Right after it appears, a click can
   // land a few milliseconds before the report's own script has attached its click handler, so
   // tap, check, and retry a few times (a person cannot tap that fast).
   const fr = p.frameLocator('#r-frame');
-  const sae = fr.locator('a.net[data-rid="rp001"][data-net="SAE"]').first();
+  const sae = fr.locator('a.net[data-rid="rp006"][data-net="SAE"]').first();
   let hits = [], tries = 0;
   while (tries < 5 && !(hits.length === 1 && hits[0] === 'XDUT.SAE')) {
     tries++;
     await sae.click();
     await p.waitForTimeout(400);
-    hits = await fr.locator('#m-rp001 .v.hit').allTextContents();
+    hits = await fr.locator('#m-rp006 .v.hit').allTextContents();
   }
   assert(hits.length === 1 && hits[0] === 'XDUT.SAE', 'report tap highlight ' + hits);
   const tapTries = tries;
 
+  // plain in-page links of the report (card -> measures -> back to card) must scroll too
+  const frame = p.frames().find(f => f.url().startsWith('blob:'));
+  await frame.evaluate(() => window.scrollTo(0, 0));
+  await fr.locator('#r-rp006 a:has-text("測定文を見る")').click();
+  await p.waitForTimeout(800);
+  // the block is near the end of the page, so it may stop short of the top: it must be scrolled to and visible
+  const m = await frame.evaluate(() => ({ top: Math.round(document.getElementById('m-rp006').getBoundingClientRect().top),
+    y: Math.round(scrollY), h: innerHeight, max: document.documentElement.scrollHeight - innerHeight }));
+  assert(m.y > 0 && m.top > -30 && m.top < m.h - 40 && (Math.abs(m.top) < 30 || m.y >= m.max - 2),
+    'link to measures did not scroll: ' + JSON.stringify(m));
+  await fr.locator('#m-rp006 a:has-text("カードへ戻る")').click();
+  await p.waitForTimeout(800);
+  const cTop = await frame.evaluate(() => Math.round(document.getElementById('r-rp006').getBoundingClientRect().top));
+  assert(Math.abs(cTop) < 30, 'link back to the card did not scroll: top=' + cTop);
+
   // download races.meas
   const [dlMeas] = await Promise.all([p.waitForEvent('download'), p.click('#r-files a:has-text("races.meas")')]);
   const measText = fs.readFileSync(await dlMeas.path(), 'utf8');
-  assert(measText.includes('rp001_tsae') && dlMeas.suggestedFilename() === 'races.meas', 'races.meas download');
+  assert(measText.includes('rp006_tsae') && dlMeas.suggestedFilename() === 'races.meas', 'races.meas download');
 
   // decks
   await p.click('#btn-decks');

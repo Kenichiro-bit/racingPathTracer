@@ -694,10 +694,12 @@ def group_races(races):
             groups[sig] = r
             r["group_size"] = 1
             r["group_members"] = []
+            r["_pins"] = list(r["sources"])
             order.append(r)
         else:
             g = groups[sig]
             g["group_size"] += 1
+            g["_pins"] += [s for s in r["sources"] if s not in g["_pins"]]
             if len(g["group_members"]) < 50:
                 g["group_members"].append({"ccc": r["ccc_label"], "a": r["a"], "b": r["b"],
                                            "probes": r["probes"]})
@@ -804,7 +806,8 @@ def find_races(G: CCCGraph, fn: FlatNetlist, sources, cfg, log=print):
                     continue
                 races[key] = build_race(G, T, a, b, paths[a], paths[b], has_fb, s, cfg)
     out = list(races.values())
-    out.sort(key=lambda r: (CLASS_ORDER.index(r["class"]), r["stage_diff"], r["ccc"], r["a"], r["b"]))
+    # tightest races first (smallest stage difference); classes are not used for ordering
+    out.sort(key=lambda r: (r["stage_diff"], r["ccc"], r["a"], r["b"]))
     if len(out) > cfg["max_races"]:
         log(f"  note: {len(out)} races found, keeping the first {cfg['max_races']} (max_races)")
         out = out[:cfg["max_races"]]
@@ -904,7 +907,8 @@ def measure_lines(r, prefix, sup):
     p = r["probes"]
     V = lambda n: _v(n, prefix, sup)
     mid = "'th_mid*vdd_m'"
-    L = [f"* [{rid}] {r['class']} : {r['ccc_label']}"]
+    L = [f"* [{rid}] " + ("手動の測定" if r.get("manual") else "入力端子 " + ", ".join(r.get("pins", [])))
+         + f" : {r['ccc_label']}"]
     if r.get("manual"):
         L.append("*   " + ", ".join(f"{k}={v}" for k, v in p.items()))
     else:
@@ -1008,11 +1012,10 @@ def explain_race(r, cfg):
 def write_csv(races, path):
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["id", "class", "class_ja", "explain", "ccc", "input_a", "input_b", "divergence",
+        w.writerow(["id", "pins", "ccc", "input_a", "input_b", "divergence",
                     "stages_a", "stages_b", "stage_diff", "derived", "group_size", "probes", "path_a", "path_b"])
         for r in races:
-            w.writerow([r["id"], r["class"], CLASS_INFO[r["class"]][0], r.get("explain", ""),
-                        r["ccc_label"], r["a"], r["b"],
+            w.writerow([r["id"], " ".join(r.get("pins", [])), r["ccc_label"], r["a"], r["b"],
                         r["divergence"], r["stages_a"], r["stages_b"], r["stage_diff"], r["derived"],
                         r.get("group_size", 1),
                         "; ".join(f"{k}={v}" for k, v in r["probes"].items()),
@@ -1058,13 +1061,15 @@ PROBE_JA = {"sae": "SAE", "wl": "WL", "sa_t": "SA入力(T)", "sa_c": "SA入力(C
             "a": "入力A", "b": "入力B"}
 
 
-def write_html(races, meta, path):
+def _pins_text(r):
+    return "手動の測定" if r.get("manual") else "入力端子 " + ", ".join(r.get("pins", []))
+
+
+def write_html(races, meta, path, pins):
     prefix = meta.get("probe_prefix", "")
-    by_cls = Counter(r["class"] for r in races)
-    cards, blocks = [], []
+    cards, blocks = {}, []
     for r in races:
         rid = r["id"]
-        cja, metric = CLASS_INFO[r["class"]]
         flags = []
         if r.get("derived"):
             flags.append("派生")
@@ -1084,19 +1089,39 @@ def write_html(races, meta, path):
 <div class="pl"><span class="lab">A</span><span class="chain">{_chain(r['path_a'], rid)}</span><span class="st">{r['stages_a']}段</span></div>
 <div class="pl"><span class="lab">B</span><span class="chain">{_chain(r['path_b'], rid)}</span><span class="st">{r['stages_b']}段</span></div>
 <div class="sub">分岐点 {_netlink(r['divergence'], rid)} から数えた段数(差{r['stage_diff']}段) ・ 合流 {html.escape(r['ccc_label'])}</div></div>"""
-        cards.append(f"""<section class="card c-{r['class']}" id="r-{rid}">
-<header><a class="rid" href="#m-{rid}">{rid}</a><span class="tag t-{r['class']}">{cja}</span>{flag_html}</header>
-<p class="ex">{html.escape(r.get('explain', ''))}</p>
+        cards[rid] = f"""<section class="card" id="r-{rid}">
+<header><a class="rid" href="#m-{rid}">{rid}</a>{flag_html}</header>
+<div class="sub">{html.escape(_pins_text(r))}</div>
 {paths}
 <div class="probes"><span class="lab2">プローブ</span>{probes}</div>
-<div class="sub">主指標: {html.escape(metric)} ・ <a href="#m-{rid}">測定文を見る ↓</a></div>
-</section>""")
+<div class="sub"><a href="#m-{rid}">測定文を見る ↓</a></div>
+</section>"""
         blocks.append(f"""<div class="mblk" id="m-{rid}" data-rid="{rid}">
-<div class="mh"><b>{rid}</b> <span class="tag t-{r['class']}">{cja}</span> <a href="#r-{rid}">↑ カードへ戻る</a></div>
+<div class="mh"><b>{rid}</b> <span class="pins">{html.escape(_pins_text(r))}</span> <a href="#r-{rid}">↑ カードへ戻る</a></div>
 <div class="note"></div>
 <pre>{_meas_html(r.get('meas', []), prefix)}</pre></div>""")
-    summary = " ".join(f'<span class="tag t-{c}">{CLASS_INFO[c][0]} {by_cls[c]}</span>'
-                       for c in CLASS_ORDER if by_cls[c])
+    # one section per input pin; a race shared by several pins is drawn under its first pin
+    # and linked from the others
+    by_id = {r["id"]: r for r in races}
+    nav, sections = [], []
+    for i, pe in enumerate(pins):
+        p, ids = pe["pin"], pe["races"]
+        nav.append(f'<a class="tag t-pin" href="#p-{i}">{html.escape(p)} {len(ids)}</a>')
+        own = [cards[x] for x in ids if by_id[x]["pins"][0] == p]
+        others = [x for x in ids if by_id[x]["pins"][0] != p]
+        sec = f'<h2 id="p-{i}">入力端子 {html.escape(p)} <span class="cnt">競合 {len(ids)}件</span></h2>\n' + "".join(own)
+        if others:
+            sec += ('<p class="also">ほかの入力端子の下に載せた競合: ' + "、".join(
+                f'<a href="#r-{x}">{x}</a>({html.escape(by_id[x]["pins"][0])})' for x in others) + "</p>")
+        if not ids:
+            sec += '<p class="meta">この端子から始まる競合はありません。</p>'
+        sections.append(sec)
+    manual = [r for r in races if r.get("manual")]
+    if manual:
+        nav.append(f'<a class="tag t-pin" href="#p-manual">手動の測定 {len(manual)}</a>')
+        sections.append(f'<h2 id="p-manual">手動の測定 <span class="cnt">{len(manual)}件</span></h2>\n'
+                        + "".join(cards[r["id"]] for r in manual))
+    summary = " ".join(nav)
     warn = ""
     if meta.get("warnings"):
         warn = "<details><summary>警告 {}件</summary><ul>{}</ul></details>".format(
@@ -1108,7 +1133,7 @@ def write_html(races, meta, path):
 <title>racepath report - {html.escape(meta['top'])}</title>
 <style>
 :root{{--bg:#f7f6f2;--card:#fff;--fg:#1d1d1b;--mute:#6b6a64;--line:#e4e1d8;--hit:#ffe58a;
---sae:#b4532a;--wl:#2a6fb4;--hold:#7a3fb0;--clk:#2f8a5b;--gen:#76746c}}
+--wl:#2a6fb4;--gen:#76746c}}
 *{{box-sizing:border-box}}
 body{{font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;background:var(--bg);color:var(--fg);
 margin:0;padding:20px;line-height:1.55;max-width:1100px;margin:0 auto}}
@@ -1117,13 +1142,11 @@ h1{{font-size:20px;margin:0 0 4px}} h2{{font-size:16px;margin:28px 0 10px}}
 .mono,.chain,.pb,pre{{font-family:ui-monospace,Menlo,Consolas,monospace}}
 .card{{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--gen);border-radius:10px;
 padding:14px 16px;margin:12px 0}}
-.c-sae_bl{{border-left-color:var(--sae)}} .c-wl_pre{{border-left-color:var(--wl)}} .c-hold{{border-left-color:var(--hold)}}
-.c-clock_pair{{border-left-color:var(--clk)}}
 header{{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px}}
 .rid{{font-family:ui-monospace,monospace;font-weight:700;color:var(--fg);text-decoration:none;margin-right:2px}}
 .tag{{display:inline-block;font-size:12px;padding:2px 9px;border-radius:10px;color:#fff;white-space:nowrap}}
-.t-sae_bl{{background:var(--sae)}} .t-wl_pre{{background:var(--wl)}} .t-hold{{background:var(--hold)}}
-.t-clock_pair{{background:var(--clk)}} .t-generic{{background:var(--gen)}}
+.t-pin{{background:var(--wl);text-decoration:none;margin:2px 0}} .cnt{{font-size:13px;color:var(--mute);font-weight:400}}
+.pins{{font-size:12px;color:var(--mute)}} .also{{font-size:13px;color:var(--mute)}}
 .flag{{font-size:11px;border:1px solid var(--line);border-radius:8px;padding:1px 7px;color:var(--mute)}}
 .ex{{margin:4px 0 10px;font-size:14.5px}}
 .paths{{background:#faf9f5;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:8px}}
@@ -1156,7 +1179,7 @@ details{{margin:10px 0;font-size:13px}}
 起点 {html.escape(', '.join(meta['sources']))}{static} ・ 競合 {len(races)}件</div>
 <div>{summary}</div>{warn}
 <p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。段数は、分岐点(2本の経路が分かれる最後の共通ネット)から、合流するブロックの入力までに通る論理段の数です。インバータや NAND など、チャネルでつながったトランジスタのまとまり(CCC)1つを1段と数えます。0段はその入力が分岐点そのものであることを、同相/逆相は起点(CLK など)から見た信号の向きを表します。</p>
-{''.join(cards)}
+{''.join(sections)}
 <h2>測定文 (races.meas)</h2>
 {''.join(blocks)}
 <script>
@@ -1167,9 +1190,21 @@ details{{margin:10px 0;font-size:13px}}
     document.querySelectorAll('.note').forEach(function(x){{x.className='note';x.innerHTML='';}});
   }}
   function esc(t){{return t.replace(/[&<>"]/g,function(c){{return {{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}}[c];}});}}
+  function jump(id){{
+    var t = document.getElementById(id); if(!t) return false;
+    t.scrollIntoView({{behavior:'smooth', block:'start'}});
+    try {{ if(history.replaceState) history.replaceState(null, '', '#'+id); }} catch(err) {{}}
+    return true;
+  }}
   document.addEventListener('click', function(e){{
     var a = e.target.closest ? e.target.closest('a.net') : null;
-    if(!a) return;
+    if(!a){{
+      // in-page links (card <-> measures, pin sections) scrolled by script, so they also work
+      // when this report is shown from a blob: URL inside the single-file racepath.html
+      var h = e.target.closest ? e.target.closest('a[href^="#"]') : null;
+      if(h && jump(h.getAttribute('href').slice(1))) e.preventDefault();
+      return;
+    }}
     e.preventDefault();
     var rid = a.getAttribute('data-rid'), net = a.getAttribute('data-net');
     var blk = document.getElementById('m-'+rid); if(!blk) return;
@@ -1196,7 +1231,7 @@ details{{margin:10px 0;font-size:13px}}
     }}
     blk.scrollIntoView({{behavior:'smooth', block:'start'}});
     blk.classList.add('flash'); setTimeout(function(){{blk.classList.remove('flash');}}, 1400);
-    if(history.replaceState) history.replaceState(null, '', '#m-'+rid);
+    try {{ if(history.replaceState) history.replaceState(null, '', '#m-'+rid); }} catch(err) {{}}
   }});
 }})();
 </script>
@@ -1245,6 +1280,16 @@ def cmd_analyze(args):
             log(f"  grouped {n_raw} races into {len(races)} structural groups (--no-group to keep all)")
     nets_all = set(G.fanout) | set(G.ccc_of)
     add_extra_checks(races, cfg, nets_all, log)
+    # input pins (launch nets as resolved in the netlist), in the order given
+    pin_order = []
+    for s in srcs:
+        n = resolve_net(s, nets_all)
+        if n is not None and n not in pin_order:
+            pin_order.append(n)
+    rank = {p: i for i, p in enumerate(pin_order)}
+    for r in races:
+        rp = r.pop("_pins", r["sources"])
+        r["pins"] = sorted(rp, key=lambda x: (rank.get(x, len(rank)), x))
     prefix = cfg["probe_prefix"]
     for i, r in enumerate(races, 1):
         r["id"] = f"rp{i:03d}"
@@ -1272,16 +1317,27 @@ def cmd_analyze(args):
         "static_inputs": static_ports,
         "probe_prefix": prefix, "cfg": cfg, "warnings": fn.warnings,
     }
+    pins = [{"pin": p, "races": [r["id"] for r in races if p in r["pins"]]} for p in pin_order]
     with open(os.path.join(args.out, "races.json"), "w", encoding="utf-8") as f:
-        json.dump({"meta": meta, "races": races}, f, ensure_ascii=False, indent=1)
+        json.dump({"meta": meta, "pins": pins, "races": races}, f, ensure_ascii=False, indent=1)
     write_csv(races, os.path.join(args.out, "races.csv"))
-    write_html(races, meta, os.path.join(args.out, "report.html"))
+    write_html(races, meta, os.path.join(args.out, "report.html"), pins)
 
-    by = Counter(r["class"] for r in races)
-    log(f"  races: {len(races)}  (" + ", ".join(f"{c}={by[c]}" for c in CLASS_ORDER if by[c]) + ")")
-    for r in races[: args.show]:
-        g = f"  x{r['group_size']}" if r.get("group_size", 1) > 1 else ""
-        log(f"   {r['id']} {r['class']:<10} {stage_summary(r)}  @ {r['ccc_label']}{g}")
+    log(f"  races: {len(races)}  (入力端子 {len(pin_order)}本)")
+    by_id = {r["id"]: r for r in races}
+    groups = [(f"入力端子 {pe['pin']}  競合 {len(pe['races'])}件", [by_id[x] for x in pe["races"]]) for pe in pins]
+    manual = [r for r in races if r.get("manual")]
+    if manual:
+        groups.append((f"手動の測定  {len(manual)}件", manual))
+    shown = 0
+    for title, rs in groups:
+        log(f"  ■ {title}")
+        for r in rs:
+            if shown >= args.show:
+                break
+            shown += 1
+            g = f"  x{r['group_size']}" if r.get("group_size", 1) > 1 else ""
+            log(f"   {r['id']} {stage_summary(r)}  @ {r['ccc_label']}{g}")
     for w in fn.warnings[:10]:
         log(f"  warning: {w}")
     log(f"  wrote {args.out}/races.json, races.csv, races.meas, races_params.inc, report.html")
@@ -1491,15 +1547,15 @@ def cmd_collect(args):
             if any(x is None for x in vals):
                 verdict = "測定失敗あり" if verdict in ("", "OK") else verdict + " / 測定失敗あり"
             wc = cnames[vals.index(worst)] if worst is not None else ""
-            rows.append([r["id"], r["class"], mt, r["a"], r["b"]] + vals + [worst, wc, verdict])
+            rows.append([r["id"], mt, r["a"], r["b"]] + vals + [worst, wc, verdict])
     with open(args.out, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
-        w.writerow(["id", "class", "metric", "input_a", "input_b"] + cnames + ["worst", "worst_corner", "verdict"])
+        w.writerow(["id", "metric", "input_a", "input_b"] + cnames + ["worst", "worst_corner", "verdict"])
         w.writerows(rows)
     print(f"{len(cnames)} corners, {len(rows)} metrics -> {args.out}")
     for row in rows:
         if row[-1] and row[-1] not in ("OK",):
-            print(f"  {row[0]} {row[1]:<10} {row[2]:<10} worst={row[-3]} @ {row[-2]}  {row[-1]}")
+            print(f"  {row[0]} {row[1]:<10} worst={row[-3]} @ {row[-2]}  {row[-1]}")
 
 
 def cmd_serve(args):
