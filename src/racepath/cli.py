@@ -40,6 +40,7 @@ DEFAULT_CFG = {
     "pmos_models": r"^p|pch|pmos|pfet",
     "nmos_models": r"^n|nch|nmos|nfet",
     "sources": [],              # launch nets; empty = input ports (PININFO) or all ports
+    "static_inputs": [],        # globs; pins held constant (test mode, scan enable...): never launch nets
     "hier_sep": ".",
     "probe_prefix": "XDUT.",    # instance path of the DUT in the testbench
     "merge_resistors": True,    # treat resistors as shorts (post-layout netlists)
@@ -1084,6 +1085,7 @@ def write_html(races, meta, path):
         warn = "<details><summary>警告 {}件</summary><ul>{}</ul></details>".format(
             len(meta["warnings"]), "".join(f"<li>{html.escape(w)}</li>" for w in meta["warnings"]))
     js_prefix = json.dumps(prefix)
+    static = (" ・ 固定端子 " + html.escape(", ".join(meta["static_inputs"]))) if meta.get("static_inputs") else ""
     doc = f"""<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>racepath report - {html.escape(meta['top'])}</title>
@@ -1134,7 +1136,7 @@ details{{margin:10px 0;font-size:13px}}
 </style></head><body>
 <h1>racepath レポート: {html.escape(meta['top'])}</h1>
 <div class="meta">{html.escape(meta['netlist'])} ({meta['format']}) ・ Tr {meta['n_mos']} ・ CCC {meta['n_ccc']} ・
-起点 {html.escape(', '.join(meta['sources']))} ・ 競合 {len(races)}件</div>
+起点 {html.escape(', '.join(meta['sources']))}{static} ・ 競合 {len(races)}件</div>
 <div>{summary}</div>{warn}
 <p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。段数はチャネル接続ブロック(CCC)単位の最短経路です。</p>
 {''.join(cards)}
@@ -1192,6 +1194,8 @@ def cmd_analyze(args):
     cfg = load_cfg(args.config, {"probe_prefix": args.prefix})
     if args.source:
         cfg["sources"] = args.source
+    if args.static:
+        cfg["static_inputs"] = list(cfg.get("static_inputs") or []) + args.static
     os.makedirs(args.out, exist_ok=True)
     log = (lambda *a, **k: None) if args.quiet else print
     log(f"racepath {VERSION}: reading {args.netlist}")
@@ -1200,8 +1204,22 @@ def cmd_analyze(args):
     G = CCCGraph(fn)
     log(f"  format={st.detected_format} top={fn.top} transistors={len(fn.mos)} CCC={G.n_ccc} "
         f"supplies={len(fn.supplies)}")
-    srcs = cfg["sources"] or default_sources(fn, G)
+    static_pats = cfg.get("static_inputs") or []
+    static_ports = [p for p in fn.top_ports if p not in fn.supplies and glob_match(p, static_pats)]
+    if cfg["sources"]:
+        srcs = []
+        for s in cfg["sources"]:
+            if static_pats and glob_match(s, static_pats):
+                log(f"  warning: source '{s}' is a static input (static_inputs); ignored")
+            else:
+                srcs.append(s)
+    else:
+        srcs = [s for s in default_sources(fn, G) if not (static_pats and glob_match(s, static_pats))]
     log(f"  sources: {', '.join(srcs)}")
+    if static_pats:
+        log("  static inputs: " + (", ".join(static_ports) if static_ports
+                                   else f"(none matched {', '.join(static_pats)})")
+            + "  (held constant: not used as launch nets)")
     races = find_races(G, fn, srcs, cfg, log)
     n_raw = len(races)
     if not args.no_group:
@@ -1234,6 +1252,7 @@ def cmd_analyze(args):
         "format": st.detected_format, "top": fn.top, "top_ports": fn.top_ports,
         "pininfo": fn.pininfo, "sources": srcs, "n_mos": len(fn.mos), "n_ccc": G.n_ccc,
         "supplies_top": [p for p in fn.top_ports if p in fn.supplies],
+        "static_inputs": static_ports,
         "probe_prefix": prefix, "cfg": cfg, "warnings": fn.warnings,
     }
     with open(os.path.join(args.out, "races.json"), "w", encoding="utf-8") as f:
@@ -1483,6 +1502,8 @@ def main(argv=None):
     a.add_argument("-f", "--format", default="auto", choices=["auto", "cdl", "spice", "hspice", "spectre"])
     a.add_argument("-t", "--top")
     a.add_argument("-s", "--source", action="append", help="launch net (repeatable)")
+    a.add_argument("--static", action="append",
+                   help="input pin held constant, e.g. test mode (glob, repeatable; adds to static_inputs)")
     a.add_argument("-c", "--config")
     a.add_argument("-o", "--out", default="racepath_out")
     a.add_argument("--prefix", help="probe prefix = DUT instance path in testbench (default XDUT.)")

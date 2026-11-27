@@ -24,6 +24,7 @@ racepath analyze <netlist> -o <netlistのstem>_racepath
 | `model '…' not recognised as MOS` | モデル名の判定漏れ。`racepath.json` の `pmos_models` / `nmos_models` に正規表現を追加 |
 | `several top candidates` | ユーザーにトップセルを確認して `--top` を付ける |
 | `sources:` が想定と違う(CLKが無い、出力ピンが入っている) | ユーザーに起点を確認して `-s CLK` などを付ける |
+| `sources:` にテストモード・スキャン・ヒューズなど通常動作で固定の端子(TM, TEST*, SCAN_EN など)が入っている | ユーザーに確認して `racepath.json` の `static_inputs` に追加(または `--static`)。固定端子だけから生まれる偽の競合が消える |
 | `transistors=0` や `races: 0` | フォーマット(`-f cdl` / `-f spectre`)、トップ、`supplies` の設定を疑う |
 | 電源名が `VDD*`/`VSS*` 系以外(例: VDDM, VCS) | `racepath.json` の `supplies` に追加 |
 

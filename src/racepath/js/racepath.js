@@ -11,7 +11,7 @@
 (function (root) {
 "use strict";
 
-var VERSION = "0.3.0";  // must equal racepath.__version__ (checked by tests)
+var VERSION = "0.4.0";  // must equal racepath.__version__ (checked by tests)
 
 var DEFAULT_CFG = {
   supplies: ["VDD*", "VSS*", "GND*", "VCC*", "VPWR*", "VGND*", "VPP*", "VBB*",
@@ -20,6 +20,7 @@ var DEFAULT_CFG = {
   pmos_models: "^p|pch|pmos|pfet",
   nmos_models: "^n|nch|nmos|nfet",
   sources: [],
+  static_inputs: [],
   hier_sep: ".",
   probe_prefix: "XDUT.",
   merge_resistors: true,
@@ -1077,6 +1078,7 @@ function reportHtml(races, meta) {
       meta.warnings.map(function (w) { return "<li>" + esc(w) + "</li>"; }).join("") + "</ul></details>";
   }
   var jsPrefix = pyJsonAscii(prefix);
+  var staticHtml = (meta.static_inputs && meta.static_inputs.length) ? " ・ 固定端子 " + esc(meta.static_inputs.join(", ")) : "";
   return `<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>racepath report - ${esc(meta.top)}</title>
@@ -1127,7 +1129,7 @@ details{margin:10px 0;font-size:13px}
 </style></head><body>
 <h1>racepath レポート: ${esc(meta.top)}</h1>
 <div class="meta">${esc(meta.netlist)} (${meta.format}) ・ Tr ${meta.n_mos} ・ CCC ${meta.n_ccc} ・
-起点 ${esc(meta.sources.join(', '))} ・ 競合 ${races.length}件</div>
+起点 ${esc(meta.sources.join(', '))}${staticHtml} ・ 競合 ${races.length}件</div>
 <div>${summary}</div>${warn}
 <p class="meta">ノード名をタップすると、その競合の測定文へ移動して該当箇所をハイライトします。段数はチャネル接続ブロック(CCC)単位の最短経路です。</p>
 ${cards.join('')}
@@ -1185,7 +1187,8 @@ ${blocks.join('')}
  *   opts.netlist     netlist path as given on the command line (log line, format detection)
  *   opts.netlistAbs  absolute path stored in races.json meta / report (default: opts.netlist)
  *   opts.out         output directory shown in the log (default "racepath_out")
- *   opts.format, opts.top, opts.sources [], opts.config (object), opts.prefix, opts.noGroup,
+ *   opts.format, opts.top, opts.sources [], opts.static [] (added to static_inputs),
+ *   opts.config (object), opts.prefix, opts.noGroup,
  *   opts.show (default 30), opts.quiet
  * Throws RacepathError (with .log holding the console text so far) on fatal errors.
  */
@@ -1196,14 +1199,31 @@ function analyze(opts) {
   try {
     var cfg = loadCfg(opts.config || null, { probe_prefix: opts.prefix });
     if (opts.sources && opts.sources.length) cfg.sources = opts.sources.slice();
+    if (opts.static && opts.static.length) cfg.static_inputs = (cfg.static_inputs || []).concat(opts.static);
     log("racepath " + VERSION + ": reading " + opts.netlist);
     var st = parseNetlist(opts.netlist, opts.text, opts.format || "auto");
     var fn = flatten(st, cfg, opts.top || null);
     var G = new CCCGraph(fn);
     log("  format=" + st.detected_format + " top=" + fn.top + " transistors=" + fn.mos.length + " CCC=" + G.n_ccc +
       " supplies=" + fn.supplies.size);
-    var srcs = (cfg.sources && cfg.sources.length) ? cfg.sources : defaultSources(fn, G);
+    var staticPats = cfg.static_inputs || [];
+    var isStatic = function (n) { return staticPats.length > 0 && globMatch(n, staticPats); };
+    var staticPorts = fn.top_ports.filter(function (p) { return !fn.supplies.has(p) && globMatch(p, staticPats); });
+    var srcs;
+    if (cfg.sources && cfg.sources.length) {
+      srcs = [];
+      cfg.sources.forEach(function (s) {
+        if (isStatic(s)) log("  warning: source '" + s + "' is a static input (static_inputs); ignored");
+        else srcs.push(s);
+      });
+    } else {
+      srcs = defaultSources(fn, G).filter(function (s) { return !isStatic(s); });
+    }
     log("  sources: " + srcs.join(", "));
+    if (staticPats.length) {
+      log("  static inputs: " + (staticPorts.length ? staticPorts.join(", ") : "(none matched " + staticPats.join(", ") + ")") +
+        "  (held constant: not used as launch nets)");
+    }
     var races = findRaces(G, fn, srcs, cfg, log);
     var nRaw = races.length;
     if (!opts.noGroup) {
@@ -1233,6 +1253,7 @@ function analyze(opts) {
       format: st.detected_format, top: fn.top, top_ports: fn.top_ports,
       pininfo: fn.pininfo, sources: srcs, n_mos: fn.mos.length, n_ccc: G.n_ccc,
       supplies_top: fn.top_ports.filter(function (p) { return fn.supplies.has(p); }),
+      static_inputs: staticPorts,
       probe_prefix: prefix, cfg: cfg, warnings: fn.warnings
     };
     files["races.json"] = pyJson({ meta: meta, races: races }, 1);

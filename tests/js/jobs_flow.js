@@ -35,6 +35,9 @@ for (const rel of ['out/report.html', 'out/races.meas', 'out/races_params.inc', 
   const f = jobs.file(up.job, rel);
   fs.writeFileSync(path.join(outDir, f.name), f.bytes);
 }
+const tm = call('POST', '/api/upload', { name: 'testmode.cdl' }, null,
+  new Uint8Array(fs.readFileSync(path.join(__dirname, '..', 'cases', 'testmode.cdl'))));
+res.static = call('POST', '/api/analyze', {}, { job: tm.job, static: 'TM,scan_en' });
 const top = call('POST', '/api/upload', { name: 'x.cdl' }, null, new TextEncoder().encode('.SUBCKT A x\nMP0 x x VDD VDD pch\n.ENDS\n'));
 res.errors.notop = errOf(() => jobs.route('POST', '/api/analyze', {}, { job: top.job, top: 'NOPE' }));
 fs.writeFileSync(path.join(outDir, 'flow.json'), JSON.stringify(res, null, 1));

@@ -70,6 +70,11 @@ def test_jobs_flow_matches_cli(tmp_path):
     assert flow["summary"]["collect"]["rows"] == flow["collect"]["rows"]
     assert flow["summary"]["decks"] == flow["decks"]["decks"]
 
+    st = flow["static"]
+    assert st["sources"] == ["CLK"] and st["static_inputs"] == ["TM"] and st["options"]["static"] == "TM scan_en"
+    assert ("generic", "TMB", "TMBB") not in {(r["class"], r["a"], r["b"]) for r in st["races"]}
+    assert len(st["races"]) == 6
+
     e = flow["errors"]
     assert e["path"]["status"] == 400 and e["badcfg"]["status"] == 400
     assert e["nojob"]["status"] == 404 and e["badfile"]["status"] == 404

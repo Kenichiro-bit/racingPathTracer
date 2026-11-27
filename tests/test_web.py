@@ -116,6 +116,18 @@ def test_analyze_by_path_spectre_with_options(server):
     assert res["options"]["top"] == "SRAM_DEMO" and res["options"]["no_group"] is True
 
 
+def test_analyze_with_static_inputs(server):
+    base, _ = server
+    case = ROOT / "tests" / "cases" / "testmode.cdl"
+    res = j(call(base, "POST", "/api/analyze", {"path": str(case)}))
+    assert ("generic", "TMB", "TMBB") in {(r["class"], r["a"], r["b"]) for r in res["races"]}
+    res = j(call(base, "POST", "/api/analyze", {"path": str(case), "static": "TM, scan_en"}))
+    assert res["sources"] == ["CLK"] and res["static_inputs"] == ["TM"]
+    assert {(r["class"], r["a"], r["b"]) for r in res["races"]} == EXPECTED
+    assert res["options"]["static"] == "TM scan_en"
+    assert "static inputs: TM" in res["log"]
+
+
 def test_analyze_errors_are_reported(server, tmp_path):
     base, _ = server
     st, body, _ = call(base, "POST", "/api/analyze", {"path": str(tmp_path / "missing.cdl")})

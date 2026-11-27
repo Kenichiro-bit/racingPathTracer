@@ -100,7 +100,7 @@ Jobs.prototype.summary = function (name) {
     j.out.races.forEach(function (r) { counts[r["class"]] = (counts[r["class"]] || 0) + 1; });
     Object.assign(res, {
       analyzed: true, top: m.top, format: m.format, n_mos: m.n_mos, n_ccc: m.n_ccc,
-      sources: m.sources, warnings: m.warnings, counts: counts,
+      sources: m.sources, static_inputs: m.static_inputs || [], warnings: m.warnings, counts: counts,
       races: j.out.races.map(function (r) {
         return { id: r.id, "class": r["class"], a: r.a, b: r.b, stages_a: r.stages_a, stages_b: r.stages_b,
                  divergence: r.divergence, group_size: r.group_size || 1, derived: !!r.derived, explain: r.explain || "" };
@@ -131,6 +131,8 @@ Jobs.prototype.analyze = function (req) {
   if (top) opts.top = top;
   var srcs = String(req.sources || "").split(/[\s,]+/).filter(Boolean);
   if (srcs.length) opts.sources = srcs.join(" ");
+  var stat = String(req["static"] || "").split(/[\s,]+/).filter(Boolean);
+  if (stat.length) opts["static"] = stat.join(" ");
   var prefix = String(req.prefix || "").trim();
   if (prefix) opts.prefix = prefix;
   if (req.no_group) opts.no_group = true;
@@ -142,7 +144,7 @@ Jobs.prototype.analyze = function (req) {
   j.options = opts; j.out = null; j.decks = null; j.collect = null;
   try {
     j.out = E.analyze({ text: text(j.netlist), netlist: j.netlistName, out: "out", format: fmt, top: top || null,
-                        sources: srcs, config: cfg, prefix: prefix || undefined, noGroup: !!req.no_group, show: 200 });
+                        sources: srcs, "static": stat, config: cfg, prefix: prefix || undefined, noGroup: !!req.no_group, show: 200 });
     j.log = j.out.log;
   } catch (e) {
     j.log = e.log !== undefined ? e.log : String(e);

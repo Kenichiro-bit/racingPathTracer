@@ -327,6 +327,7 @@ td.v-OK{color:var(--ok)}
     <div class="row">
       <div><label for="o-top">トップセル(-t)</label><input type="text" id="o-top" placeholder="自動"></div>
       <div><label for="o-src">起点ネット(-s、空白かカンマ区切り)</label><input type="text" id="o-src" placeholder="自動(例: CLK)"></div>
+      <div><label for="o-static">固定端子(--static、テストモードなど。* 可)</label><input type="text" id="o-static" placeholder="例: TM* SCAN_EN"></div>
       <div><label for="o-fmt">形式(-f)</label>
         <select id="o-fmt"><option value="auto">自動</option><option value="cdl">CDL</option>
         <option value="spice">SPICE</option><option value="hspice">HSPICE</option><option value="spectre">Spectre</option></select></div>
@@ -458,7 +459,7 @@ var drop = $("drop");
 drop.addEventListener("drop", function(e){ if(e.dataTransfer.files.length){ $("netfile").files = e.dataTransfer.files; } });
 
 function options(){
-  return {top:$("o-top").value, sources:$("o-src").value, format:$("o-fmt").value,
+  return {top:$("o-top").value, sources:$("o-src").value, static:$("o-static").value, format:$("o-fmt").value,
           prefix:$("o-prefix").value, no_group:$("o-nogroup").checked, config:$("o-cfg").value};
 }
 $("btn-analyze").addEventListener("click", function(){
@@ -520,7 +521,8 @@ function show(res){
   var files = $("r-files"); files.textContent = "";
   if(!res.analyzed){ $("r-frame").classList.add("hidden"); return; }
   [["トップ",res.top],["形式",res.format],["トランジスタ",res.n_mos],["CCC",res.n_ccc],
-   ["起点",(res.sources||[]).join(", ")],["競合",res.races.length]].forEach(function(f){
+   ["起点",(res.sources||[]).join(", ")]].concat((res.static_inputs||[]).length ? [["固定端子",res.static_inputs.join(", ")]] : [])
+   .concat([["競合",res.races.length]]).forEach(function(f){
     var d = el("div",{"class":"fact"}); d.appendChild(el("div",{"class":"l"},f[0])); d.appendChild(el("div",{"class":"v"},f[1]));
     facts.appendChild(d);
   });

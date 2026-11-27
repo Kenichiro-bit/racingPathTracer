@@ -34,6 +34,7 @@ Claude Code に自分で作らせたいときは、この文書をそのまま�
 - **CCC(チャネル接続ブロック)**:非電源のS/DノードをUnion-Findでつなぐ。CCCの入力は、ゲートネットのうちCCC内部にも電源にもないもの。
 - **BFS**:起点ネットから「ネット → そのネットをゲートに持つCCC → CCC内の全ネット」とたどり、各ネットの最短経路(CCC段数)と、どこから来たかを記録する。
   - 起点の既定値:PININFOで `I` のピン。なければ、どのCCCのメンバーでもないトップポート(=どのチャネルにも駆動されていないピン)。
+  - **固定端子 `static_inputs`**(v0.4.0):テストモードやスキャンイネーブルなど、通常動作では固定の入力ピンをグロブ(大文字小文字を区別しない)で指定する。設定キー `static_inputs` と CLI の `--static`(複数可、設定に追加)。該当ピンは起点にしない(既定の起点からも `-s` の明示からも除外し、明示の場合は警告を出す)。これで、固定端子だけから作られる信号同士の合流や、固定端子由来の信号と変化する信号の組は出なくなる。起点(CLK など)からの経路が固定端子のゲートを通る競合はそのまま検出する。トップポートのうち該当したものを meta の `static_inputs` に入れ、コンソールに `static inputs: ...`(該当なしなら `(none matched ...)`)と出す。
 - **合流点**:到達可能な入力を2本以上持つCCC。
   - 経路が自分自身のCCCを通る入力は帰還として除外し、そのCCCを「帰還あり」とする。
   - バスの兄弟(`WL<0>` と `WL<1>`、`\<` によるエスケープも考慮)は代表1本にまとめてから組を作る(デコードで排他なため)。
@@ -66,7 +67,7 @@ CCC内で入力gが駆動する素子について、次を判定しておく。
   - 交差の判定はすべて `when v(x)='th_mid*vdd_m' cross=N td='t_m'`。
   - 各競合の前に、コメントで「種別、合流CCC、段数、分岐点、NG条件(日本語)、同型件数」を書く。
 - `races_params.inc`:上記パラメータの既定値(vdd 0.8、t_m 1n、th_mid 0.5、th_pre 0.9、sa_dv_req 0.05)。
-- `races.json`:meta(ネットリスト、形式、トップ、ポート、PININFO、起点、Tr数、CCC数、トップの電源、probe_prefix、cfg、警告)と races。races の各要素には `explain` と `meas` 行も含める。
+- `races.json`:meta(ネットリスト、形式、トップ、ポート、PININFO、起点、Tr数、CCC数、トップの電源、固定端子(static_inputs)、probe_prefix、cfg、警告)と races。races の各要素には `explain` と `meas` 行も含める。
 - `races.csv`:UTF-8(BOM付き)。日本語の種別名と explain の列を入れる。
 - `report.html`:単一ファイルのHTMLで、スマホでも読めるカード表示にする。
   - 各カード:ID、種別タグ(色分け)、フラグ(派生、手動、同型×N)、**日本語のNG条件説明**、パスA・B(ネット列と段数)、分岐点、合流CCC、プローブのチップ。
@@ -83,7 +84,7 @@ CCC内で入力gが駆動する素子について、次を判定しておく。
 ## 5. `decks RACES_JSON CORNERS_JSON [--sim spectre|hspice]`
 - コーナーごとにデッキを1つ作る:モデルの `lib`([path, section])、`.temp`、パラメータ(`vdd` とコーナー別の `params`)、ネットリストの include、measの include、`XDUT <ports> <top>`。
 - 電源ポートは、名前が high 系なら `vdd_m`、それ以外は0の電圧源にする。
-- 起点ポートには `stimulus` の設定でパルス源を付ける(既定:delay 1n、period 4n、width 2n、tr 20p)。`static` 指定のポートは直流源、残りのポートは1GΩで接地する。
+- 起点ポートには `stimulus` の設定でパルス源を付ける(既定:delay 1n、period 4n、width 2n、tr 20p)。`static` 指定のポートは直流源、残りのポートは1GΩで接地する(固定端子に 0 以外の値を与えるときは `static` に書く)。
 - `stimulus_file` を指定した場合はそれをincludeし、自動の信号源は出さない。
 - Spectreデッキでは、CDLのネットリストとmeasを `simulator lang=spice` の区間で読む。
 - `run_all.sh` も出力する。
@@ -178,7 +179,7 @@ XLAT SAT CKBI CKI Q VDD VSS LATCH
 - `racepath serve [--host 127.0.0.1] [--port 8765] [--workdir racepath_web] [--no-browser]`。標準ライブラリの `http.server` だけで実装する(`src/racepath/web.py`)。
 - 処理はすべて既存のサブコマンド(`analyze` / `decks` / `collect`)をプロセス内で呼び、検出ロジックと出力形式はCLIと同じにする。コンソール出力は画面に表示する。
 - 画面(日本語、スマホ幅で横スクロールなし、ダークモード対応):
-  1. 解析:ネットリストのアップロード(ドロップ可)か、PC上のパス指定。オプションは `-t`、`-s`、`-f`、`--prefix`、`--no-group`、設定JSON。結果は要約(トップ、形式、Tr数、CCC数、起点、競合数、種別ごとの件数)、警告、`report.html` の埋め込み表示、出力ファイルのダウンロード。
+  1. 解析:ネットリストのアップロード(ドロップ可)か、PC上のパス指定。オプションは `-t`、`-s`、`--static`(固定端子)、`-f`、`--prefix`、`--no-group`、設定JSON。結果は要約(トップ、形式、Tr数、CCC数、起点、競合数、種別ごとの件数)、警告、`report.html` の埋め込み表示、出力ファイルのダウンロード。
   2. デッキ作成:コーナー定義JSON(既定値は `examples/corners.json` と同じ)とシミュレータを指定し、`decks/` を作って zip で渡す。シミュレーションは実行しない。
   3. 集計:結果ファイルのアップロード(フォルダ選択可。測定結果の拡張子 `.mt* .ms* .measure .lis .log .out` だけを送り、フォルダ構成を保つので `tran1` の場合も親フォルダ名でコーナー名が決まる)か、パス指定。警告閾値を指定できる。表は判定の列を先頭側に並べる(`summary.csv` の列順はCLIのまま)。
   4. 過去の解析の一覧と再表示。
