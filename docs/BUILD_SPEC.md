@@ -1,5 +1,11 @@
 # Claude Code への依頼文:racepath をゼロから作る
 
+> **このリポジトリでの配置(v0.1.0 以降)**
+> 本仕様の `racepath.py` は Python パッケージ `racepath` として `src/racepath/cli.py` に置かれ、
+> `racepath` コマンドまたは `python -m racepath` で実行する。対応 Python は 3.9 以上。
+> テストは `tests/test_racepath.py`、合成アレイ生成は `tests/gen_array.py`、スキルは `skill/racepath/SKILL.md`。
+> 分類ルールや出力形式を変えたときは、この文書も同時に更新する。
+
 Claude Code に自分で作らせたいときは、この文書をそのまま渡す。
 (出来上がったものを使うだけなら、racepath_claude_code.zip のスキルを置けば足りる。)
 
