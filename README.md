@@ -26,6 +26,29 @@ cd racepath && scripts/install_skill.sh
 このリポジトリの `skill/racepath` へのシンボリックリンクにします(既に実体のフォルダがある場合は上書きせずに止まります)。
 venv に入れたい場合は `PYTHON=.venv/bin/python scripts/install_skill.sh` のように指定します。
 
+## ブラウザで使う(`racepath serve`)
+
+```bash
+racepath serve
+```
+
+ブラウザが開き、`http://127.0.0.1:8765/` に次の画面が出ます(このPCからしか接続できません)。
+
+1. **解析**:ネットリストをドロップするか、PC上のパスを入力して「解析する」。トップセル・起点・形式・プローブの接頭辞・設定(JSON)・`--no-group` も指定できます。結果の要約、警告、`report.html`(ノードのタップで測定文へ移動)と、出力ファイルのダウンロードリンクが出ます。
+2. **コーナーデッキ**:コーナー定義(JSON)を書き換えて「デッキを作る」。zip でダウンロードし、`run_all.sh` は手元で実行します(画面からシミュレーションは実行しません)。
+3. **集計**:シミュレーション結果のフォルダを選ぶ(測定結果のファイルだけが送られます)か、パスを入力して「集計する」。判定が先頭に来る表と `summary.csv` が出ます。
+
+過去の解析は「過去の解析」から開き直せます。データは作業フォルダ `racepath_web/` に残ります。
+
+| オプション | 意味 |
+|---|---|
+| `--port 8765` | ポート番号 |
+| `--workdir racepath_web` | アップロードしたネットリストと結果を置くフォルダ |
+| `--no-browser` | ブラウザを自動で開かない |
+| `--host 127.0.0.1` | 待ち受けるアドレス。ほかの端末から使う場合だけ変える(社外秘のネットリストを扱うときは変えない) |
+
+大きなネットリスト(数百MB)はアップロードより「パスを指定」のほうが速く済みます。
+
 ## Claude Code での使い方
 
 ```text
@@ -50,6 +73,10 @@ editable インストールとシンボリックリンクなので、`git pull` 
 ---
 
 ## コマンド
+
+### serve — ブラウザ画面を開く
+
+上の「ブラウザで使う」を参照してください。
 
 ### analyze — 競合を検出する
 
@@ -144,7 +171,7 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev,yaml]"
 リポジトリ構成:
 
 ```text
-src/racepath/        CLI 本体(cli.py)
+src/racepath/        CLI 本体(cli.py)とブラウザ画面(web.py)
 tests/               受け入れテスト、合成アレイ生成(gen_array.py)、誤分類の再現ケース(cases/)
 examples/            デモネットリスト(CDL / Spectre)とコーナー定義
 skill/racepath/      Claude Code スキル

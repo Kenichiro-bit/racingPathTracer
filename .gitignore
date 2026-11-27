@@ -18,6 +18,7 @@ htmlcov/
 racepath_out/
 racepath_decks/
 racepath_summary.csv
+racepath_web/
 examples/output/
 
 # simulator outputs
