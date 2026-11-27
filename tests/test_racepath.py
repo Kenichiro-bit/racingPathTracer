@@ -187,3 +187,22 @@ def test_collect(demo, tmp_path):
     assert rows[("rp005", "skew")]["verdict"] == "順序反転"
     assert rows[("rp006", "skew")]["verdict"] == ""
     assert summary.read_bytes().startswith(b"\xef\xbb\xbf")
+
+
+# ---------------------------------------------------------------- stage wording (v0.5.0)
+
+def test_stage_counts_are_described_from_the_divergence_point(demo, tmp_path):
+    out, data = demo
+    p = run("analyze", EXAMPLES / "sram_demo.cdl", "-o", tmp_path / "o")
+    assert "rp001 sae_bl     分岐点 CLKBUF から SAE 6段 / WL0 2段(差4段)  @ CCC#0" in p.stdout
+    assert "分岐点 CKI から CKBI 1段 / CKI 0段(分岐点そのもの)(差1段)" in p.stdout
+    meas = (out / "races.meas").read_text(encoding="utf-8")
+    assert "*   分岐点 CLKBUF から SAE まで6段(CLK と同相)、WL0 まで2段(CLK と同相)、差4段" in meas
+    assert "CKI は分岐点そのもの(0段、CLK と逆相)" in meas
+    assert "起点比" not in meas
+    html = (out / "report.html").read_text(encoding="utf-8")
+    assert "から数えた段数(差4段)" in html
+    assert "分岐点(2本の経路が分かれる最後の共通ネット)" in html
+    # the numbers themselves are unchanged
+    r = next(r for r in data["races"] if r["class"] == "sae_bl")
+    assert (r["stages_a"], r["stages_b"], r["stage_diff"], r["path_a"][0]) == (6, 2, 4, "CLKBUF")

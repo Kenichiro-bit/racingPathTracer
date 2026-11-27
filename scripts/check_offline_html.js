@@ -55,11 +55,20 @@ async function flow(browser, opts, tag) {
   const chips = await p.$$eval('#r-chips .chip', e => e.map(x => x.innerText));
   assert(chips.length === 5, 'class chips ' + chips);
 
+  // The report is loaded into the iframe from a blob URL. Right after it appears, a click can
+  // land a few milliseconds before the report's own script has attached its click handler, so
+  // tap, check, and retry a few times (a person cannot tap that fast).
   const fr = p.frameLocator('#r-frame');
-  await fr.locator('a.net[data-rid="rp001"][data-net="SAE"]').first().click();
-  await p.waitForTimeout(500);
-  const hits = await fr.locator('#m-rp001 .v.hit').allTextContents();
+  const sae = fr.locator('a.net[data-rid="rp001"][data-net="SAE"]').first();
+  let hits = [], tries = 0;
+  while (tries < 5 && !(hits.length === 1 && hits[0] === 'XDUT.SAE')) {
+    tries++;
+    await sae.click();
+    await p.waitForTimeout(400);
+    hits = await fr.locator('#m-rp001 .v.hit').allTextContents();
+  }
   assert(hits.length === 1 && hits[0] === 'XDUT.SAE', 'report tap highlight ' + hits);
+  const tapTries = tries;
 
   // download races.meas
   const [dlMeas] = await Promise.all([p.waitForEvent('download'), p.click('#r-files a:has-text("races.meas")')]);
@@ -97,7 +106,7 @@ async function flow(browser, opts, tag) {
     await p.locator('#sec-result').scrollIntoViewIfNeeded();
     await p.screenshot({ path: path.join(shots, `offline_${tag}.png`) });
   }
-  console.log(`${tag}: OK  boot ${boot.toFixed(1)}s, analyze ${((Date.now() - t1) / 1000).toFixed(1)}s total,` +
+  console.log(`${tag}: OK  boot ${boot.toFixed(1)}s, report tap ${tapTries} try, analyze ${((Date.now() - t1) / 1000).toFixed(1)}s total,` +
     ` blocked network requests: ${blocked.length}`);
   assert(blocked.length === 0, 'network requests attempted: ' + blocked);
   await ctx.close();
